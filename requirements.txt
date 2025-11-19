@@ -3,6 +3,7 @@ flask-socketio
 flask-sqlalchemy
 flask-login
 opencv-python-headless
-eventlet
+gevent
+gevent-websocket
 gunicorn
 psycopg2-binary
