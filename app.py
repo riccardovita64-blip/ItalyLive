@@ -25,10 +25,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
-# Le credenziali vengono lette dall'ambiente (più sicuro per GitHub)
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-# Se manca la mail, stampa solo nel terminale (per debug)
 app.config['MAIL_DEBUG'] = True if not os.environ.get('MAIL_USERNAME') else False
 
 db = SQLAlchemy(app)
@@ -58,7 +56,7 @@ def load_user(user_id):
 with app.app_context():
     db.create_all()
 
-# --- GESTIONE CAMERA ---
+# --- GESTIONE CAMERA (omessa per brevità) ---
 streaming_active = False
 camera = None
 
@@ -78,9 +76,10 @@ def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
-    # Se siamo su Render e non abbiamo configurato la mail, stampiamo nei log
+    # Stampa sempre il link nei log di Render/VS Code
     print(f"\n🔗 LINK ATTIVAZIONE (Debug): {confirm_url}\n")
 
+    # Invia la mail reale solo se le credenziali sono configurate
     if app.config['MAIL_USERNAME']:
         try:
             msg = Message('Conferma Account PyStream', 
@@ -89,7 +88,8 @@ def send_confirmation_email(user_email):
             msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
             mail.send(msg)
         except Exception as e:
-            print(f"Errore invio mail: {e}")
+            # Non bloccare l'utente se l'invio fallisce (potrebbe essere problema di credenziali)
+            print(f"Errore invio mail: {e}. L'utente dovrà usare il link manuale.")
 
 @app.after_request
 def add_header(response):
@@ -147,22 +147,26 @@ def login():
                 new_user = User(
                     username=username,
                     email=email,
+                    # Password criptata
                     password=generate_password_hash(password, method='pbkdf2:sha256'),
                     color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
-                    confirmed=False
+                    confirmed=False # <--- L'utente è inattivo
                 )
                 db.session.add(new_user)
                 db.session.commit()
                 send_confirmation_email(email)
-                flash('Registrazione ok! Controlla la mail (o i log) per attivare.', 'info')
+                
+                # *** FIX CRITICO: Non fare il login qui! ***
+                flash('Registrazione ok! Controlla la mail (o i log) per attivare l\'account.', 'info')
                 return redirect(url_for('login'))
+
 
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if not user or not check_password_hash(user.password, request.form.get('password')):
-                flash('Dati errati', 'error')
+                flash('Credenziali sbagliate. Riprova.', 'error')
             elif not user.confirmed:
-                flash('Account non attivo! Conferma la mail.', 'warning')
+                flash('Account non attivo! Conferma la mail.', 'warning') # <--- Blocco qui l'accesso
             else:
                 login_user(user)
                 return redirect(url_for('index'))
@@ -172,6 +176,7 @@ def login():
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try:
+        # Il token è valido per un'ora (3600 secondi)
         email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
     except:
         flash('Link scaduto o non valido.', 'error')
