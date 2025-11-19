@@ -1,11 +1,9 @@
 import os
 import random
 import sys
-import socket # 1. Importa socket
+import socket
 
-# --- FIX RETE: FORZA IPV4 ---
-# Questo blocco costringe il server a ignorare IPv6 (che causa l'errore 101)
-# e usare solo la connessione standard IPv4 verso Gmail.
+# --- FIX RETE: FORZA IPV4 (Per evitare errore 101 su Render) ---
 def getaddrinfo(*args, **kwargs):
     res = socket._original_getaddrinfo(*args, **kwargs)
     return [r for r in res if r[0] == socket.AF_INET]
@@ -13,7 +11,7 @@ def getaddrinfo(*args, **kwargs):
 if not hasattr(socket, '_original_getaddrinfo'):
     socket._original_getaddrinfo = socket.getaddrinfo
     socket.getaddrinfo = getaddrinfo
-# ---------------------------
+# -----------------------------------------------------------
 
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from flask_socketio import SocketIO, emit
@@ -31,6 +29,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_sicurezza_link')
 
+# --- DATABASE ---
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -38,17 +37,16 @@ if database_url and database_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- CONFIGURAZIONE EMAIL (PORTA 587 STANDARD + FIX IPV4) ---
+# --- EMAIL ---
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-
-# Pulizia spazi vuoti nelle variabili
-if app.config['MAIL_USERNAME']: app.config['MAIL_USERNAME'] = app.config['MAIL_USERNAME'].strip()
-if app.config['MAIL_PASSWORD']: app.config['MAIL_PASSWORD'] = app.config['MAIL_PASSWORD'].strip()
+# Pulizia credenziali
+mail_user = os.environ.get('MAIL_USERNAME')
+mail_pass = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_USERNAME'] = mail_user.strip() if mail_user else None
+app.config['MAIL_PASSWORD'] = mail_pass.strip() if mail_pass else None
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -59,6 +57,7 @@ login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
+# --- MODELLO UTENTE ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -72,6 +71,7 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+# --- FIX TABELLE DB ---
 with app.app_context():
     try:
         db.create_all()
@@ -79,6 +79,7 @@ with app.app_context():
     except Exception as e:
         log(f"❌ Errore Database: {e}")
 
+# --- CAMERA ---
 streaming_active = False
 camera = None
 
@@ -93,6 +94,7 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
+# --- INVIO MAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
@@ -114,7 +116,7 @@ def send_confirmation_email(user_email):
             </div>
             '''
             mail.send(msg)
-            log(f"✅ MAIL INVIATA A {user_email} (IPv4 Forzato)")
+            log(f"✅ MAIL INVIATA A {user_email}")
         except Exception as e:
             log(f"❌ ERRORE INVIO MAIL: {e}")
     else:
@@ -125,6 +127,7 @@ def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
+# --- ROTTE ---
 @app.route('/')
 @login_required
 def index():
@@ -158,13 +161,15 @@ def toggle_stream():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
+    
     if request.method == 'POST':
         action = request.form.get('action')
+        
         if action == 'register':
             username = request.form.get('username')
             email = request.form.get('email')
             password = request.form.get('password')
-            
+
             if User.query.filter_by(email=email).first():
                 flash('Email già usata', 'error'); return redirect(url_for('login'))
             if User.query.filter_by(username=username).first():
@@ -188,23 +193,27 @@ def login():
                 if not user.confirmed: flash('Account non attivo! Conferma la mail.', 'warning')
                 else: login_user(user); return redirect(url_for('index'))
             else: flash('Dati errati', 'error')
+
     return render_template('login.html')
 
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try: email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
     except: flash('Link scaduto.', 'error'); return redirect(url_for('login'))
+    
     user = User.query.filter_by(email=email).first_or_404()
     if not user.confirmed:
         user.confirmed = True
         db.session.add(user)
         db.session.commit()
         flash('Email confermata! Accedi.', 'success')
-    return redirect(url_for('login'))A
+    return redirect(url_for('login'))
 
 @app.route('/logout')
 @login_required
-def logout(): logout_user(); return redirect(url_for('login'))
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 @socketio.on('send_message')
 def handle_message(data):
