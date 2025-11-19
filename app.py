@@ -10,9 +10,7 @@ import cv2
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 
-# --- CONFIGURAZIONE DATABASE CLOUD-READY ---
-# Se siamo online (es. su Render), usa il database PostgreSQL fornito dall'ambiente.
-# Se siamo sul PC, usa il file database.db locale.
+# --- CONFIGURAZIONE DATABASE ---
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -21,25 +19,31 @@ app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-socketio = SocketIO(app, cors_allowed_origins="*") # Permette connessioni da qualsiasi sito
+# Cors allowed origins serve per evitare errori di connessione socket su domini esterni
+socketio = SocketIO(app, cors_allowed_origins="*")
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# --- MODELLO UTENTE (Semplificato senza conferma email) ---
+# --- MODELLO UTENTE ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
     color = db.Column(db.String(20), default='#ffffff')
-    # is_streamer: in futuro servirà per decidere chi può trasmettere
     is_streamer = db.Column(db.Boolean, default=False)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- GESTIONE CAMERA (Webcam Locale) ---
+# --- ⚠️ FIX IMPORTANTE: CREAZIONE TABELLE ---
+# Questo blocco viene eseguito SEMPRE all'avvio, anche su Render
+with app.app_context():
+    db.create_all()
+    print("✅ Database e tabelle controllati/creati con successo.")
+
+# --- GESTIONE CAMERA ---
 streaming_active = False
 camera = None
 
@@ -54,14 +58,12 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- NO CACHE HEADERS ---
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
 # --- ROTTE ---
-
 @app.route('/')
 @login_required
 def index():
@@ -79,10 +81,9 @@ def toggle_stream():
     global streaming_active, camera
     if not streaming_active:
         try:
-            # Nota: Questo funzionerà solo se il server ha una webcam fisica attaccata!
             camera = cv2.VideoCapture(0)
             if not camera.isOpened():
-                flash("Nessuna webcam trovata sul server (normale se sei in cloud).", "error")
+                flash("Nessuna webcam trovata (normale in cloud).", "error")
                 return redirect(url_for('index'))
             streaming_active = True
             socketio.emit('stream_status', {'status': 'live'})
@@ -116,7 +117,7 @@ def login():
                 )
                 db.session.add(new_user)
                 db.session.commit()
-                login_user(new_user) # Login automatico dopo registrazione
+                login_user(new_user)
                 return redirect(url_for('index'))
 
         elif action == 'login':
@@ -154,7 +155,5 @@ def handle_tip(data):
         }, broadcast=True)
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    # debug=False per produzione, host 0.0.0.0 per essere visibile
+    # Questo serve solo per il test locale
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
