@@ -1,6 +1,20 @@
 import os
 import random
 import sys
+import socket # 1. Importa socket
+
+# --- FIX RETE: FORZA IPV4 ---
+# Questo blocco costringe il server a ignorare IPv6 (che causa l'errore 101)
+# e usare solo la connessione standard IPv4 verso Gmail.
+def getaddrinfo(*args, **kwargs):
+    res = socket._original_getaddrinfo(*args, **kwargs)
+    return [r for r in res if r[0] == socket.AF_INET]
+
+if not hasattr(socket, '_original_getaddrinfo'):
+    socket._original_getaddrinfo = socket.getaddrinfo
+    socket.getaddrinfo = getaddrinfo
+# ---------------------------
+
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -10,7 +24,6 @@ from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired
 import cv2
 
-# Funzione per loggare su Render
 def log(message):
     print(message, file=sys.stdout, flush=True)
 
@@ -18,7 +31,6 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_sicurezza_link')
 
-# --- CONFIGURAZIONE DATABASE ---
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -26,18 +38,17 @@ if database_url and database_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- CONFIGURAZIONE EMAIL (BLINDATA) ---
+# --- CONFIGURAZIONE EMAIL (PORTA 587 STANDARD + FIX IPV4) ---
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 465          # Porta SSL sicura
-app.config['MAIL_USE_TLS'] = False
-app.config['MAIL_USE_SSL'] = True
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 
-# .strip() rimuove spazi vuoti per sbaglio all'inizio o alla fine
-mail_user = os.environ.get('MAIL_USERNAME')
-mail_pass = os.environ.get('MAIL_PASSWORD')
-
-app.config['MAIL_USERNAME'] = mail_user.strip() if mail_user else None
-app.config['MAIL_PASSWORD'] = mail_pass.strip() if mail_pass else None
+# Pulizia spazi vuoti nelle variabili
+if app.config['MAIL_USERNAME']: app.config['MAIL_USERNAME'] = app.config['MAIL_USERNAME'].strip()
+if app.config['MAIL_PASSWORD']: app.config['MAIL_PASSWORD'] = app.config['MAIL_PASSWORD'].strip()
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -48,7 +59,6 @@ login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- MODELLO UTENTE ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -62,7 +72,6 @@ class User(UserMixin, db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- FIX DATABASE ---
 with app.app_context():
     try:
         db.create_all()
@@ -70,7 +79,6 @@ with app.app_context():
     except Exception as e:
         log(f"❌ Errore Database: {e}")
 
-# --- GESTIONE CAMERA ---
 streaming_active = False
 camera = None
 
@@ -85,46 +93,38 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- INVIO MAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
-    # Link di backup nei log
     log(f"\n🔗 LINK ATTIVAZIONE (Backup): {confirm_url}\n")
 
     if app.config['MAIL_USERNAME'] and app.config['MAIL_PASSWORD']:
         try:
-            # Impostiamo un mittente con Nome + Email per evitare lo spam
             sender_info = ('PyStream Support', app.config['MAIL_USERNAME'])
-            
             msg = Message('Conferma Account PyStream', 
                           sender=sender_info, 
                           recipients=[user_email])
-            
-            msg.body = f'Benvenuto!\n\nClicca qui per attivare il tuo account: {confirm_url}\n\nSe non hai richiesto questo account, ignora questa email.'
+            msg.body = f'Clicca per attivare: {confirm_url}'
             msg.html = f'''
-            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                <h2 style="color: #2563eb;">Benvenuto su PyStream!</h2>
-                <p>Grazie per esserti registrato. Per iniziare a guardare le live, conferma la tua email.</p>
-                <a href="{confirm_url}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;">Conferma Email</a>
-                <p style="margin-top: 20px; font-size: 12px; color: #666;">Se il bottone non funziona, copia questo link: {confirm_url}</p>
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h2 style="color: #2563eb;">Benvenuto!</h2>
+                <p>Clicca qui sotto per confermare la tua email:</p>
+                <a href="{confirm_url}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Conferma Email</a>
             </div>
             '''
-            
             mail.send(msg)
-            log(f"✅ MAIL INVIATA CORRETTAMENTE a {user_email} (SSL 465).")
+            log(f"✅ MAIL INVIATA A {user_email} (IPv4 Forzato)")
         except Exception as e:
             log(f"❌ ERRORE INVIO MAIL: {e}")
     else:
-        log("⚠️ Mail non configurata su Render (Variabili mancanti).")
+        log("⚠️ Mail non configurata su Render.")
 
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# --- ROTTE ---
 @app.route('/')
 @login_required
 def index():
@@ -158,88 +158,61 @@ def toggle_stream():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
-    
     if request.method == 'POST':
         action = request.form.get('action')
-        
         if action == 'register':
             username = request.form.get('username')
             email = request.form.get('email')
             password = request.form.get('password')
-
-            if User.query.filter_by(email=email).first():
-                flash('Email già usata', 'error')
-                return redirect(url_for('login'))
             
+            if User.query.filter_by(email=email).first():
+                flash('Email già usata', 'error'); return redirect(url_for('login'))
             if User.query.filter_by(username=username).first():
-                flash('Username già preso', 'error')
-                return redirect(url_for('login'))
+                flash('Username già preso', 'error'); return redirect(url_for('login'))
 
             try:
-                new_user = User(
-                    username=username,
-                    email=email,
-                    password=generate_password_hash(password, method='pbkdf2:sha256'),
-                    color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
-                    confirmed=False
-                )
+                new_user = User(username=username, email=email, password=generate_password_hash(password, method='pbkdf2:sha256'), color=random.choice(['#ef4444', '#3b82f6', '#10b981']), confirmed=False)
                 db.session.add(new_user)
-                db.session.commit() 
-                
+                db.session.commit()
                 send_confirmation_email(email)
-                
                 flash('Registrazione ok! Controlla la mail.', 'info')
                 return redirect(url_for('login'))
-                
             except Exception as e:
                 db.session.rollback()
                 log(f"❌ Errore critico DB: {e}")
-                flash('Errore del server. Riprova.', 'error')
+                flash('Errore server.', 'error')
 
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
-                if not user.confirmed:
-                    flash('Account non attivo! Conferma la mail.', 'warning')
-                else:
-                    login_user(user)
-                    return redirect(url_for('index'))
-            else:
-                flash('Dati errati', 'error')
-
+                if not user.confirmed: flash('Account non attivo! Conferma la mail.', 'warning')
+                else: login_user(user); return redirect(url_for('index'))
+            else: flash('Dati errati', 'error')
     return render_template('login.html')
 
 @app.route('/confirm/<token>')
 def confirm_email(token):
-    try:
-        email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
-    except:
-        flash('Link scaduto o non valido.', 'error')
-        return redirect(url_for('login'))
-    
+    try: email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
+    except: flash('Link scaduto.', 'error'); return redirect(url_for('login'))
     user = User.query.filter_by(email=email).first_or_404()
     if not user.confirmed:
         user.confirmed = True
         db.session.add(user)
         db.session.commit()
         flash('Email confermata! Accedi.', 'success')
-    return redirect(url_for('login'))
+    return redirect(url_for('login'))A
 
 @app.route('/logout')
 @login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
+def logout(): logout_user(); return redirect(url_for('login'))
 
 @socketio.on('send_message')
 def handle_message(data):
-    if current_user.is_authenticated:
-        emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
+    if current_user.is_authenticated: emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
 
 @socketio.on('send_tip')
 def handle_tip(data):
-    if current_user.is_authenticated:
-        emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, broadcast=True)
+    if current_user.is_authenticated: emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, broadcast=True)
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
