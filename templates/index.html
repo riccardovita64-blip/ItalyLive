@@ -8,68 +8,127 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
+        /* Sfondo ispirato alla Toscana */
+        body {
+            background-color: #0d1117; 
+            background-image: url('https://placehold.co/1280x720/0d1117/30363d?text=Colline+Toscane'); /* Placeholder immagine */
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Overlay scuro per mantenere il look "dark mode" e il contrasto */
+        .main-wrapper {
+            background-color: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(5px);
+            min-height: 100vh;
+        }
+
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1f2937; }
         ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
         .tip-animation { animation: slideIn 0.5s ease-out; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        
+        #video-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
+<body class="text-white">
 
-    <!-- Navbar -->
-    <nav class="bg-gray-800 border-b border-gray-700 p-4 flex justify-between items-center h-16 shrink-0">
-        <div class="flex items-center gap-3">
-            <i class="fab fa-python text-3xl text-yellow-400"></i>
-            <h1 class="text-xl font-bold tracking-wide">Py<span class="text-blue-500">Stream</span></h1>
-        </div>
-        <div class="flex items-center gap-4">
-            <!-- Qui mostriamo il nome utente passato da Python -->
-            <span class="text-gray-300 text-sm">Ciao, <span class="font-bold text-white">{{ username }}</span>!</span>
-            <a href="/logout" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-md text-sm font-bold transition">Esci</a>
-        </div>
-    </nav>
-
-    <!-- Main Layout -->
-    <div class="flex flex-1 overflow-hidden">
-        
-        <!-- Video Area -->
-        <main class="flex-1 flex flex-col bg-black relative">
-            <div class="relative w-full h-full flex items-center justify-center bg-gray-900">
-                <div class="text-center">
-                    <i class="fas fa-satellite-dish text-6xl text-gray-600 mb-4 animate-pulse"></i>
-                    <p class="text-gray-400">Streaming Live Attivo</p>
-                </div>
-                <div id="tip-overlay" class="absolute top-10 right-10 w-80 z-50 pointer-events-none"></div>
+    <div class="main-wrapper flex flex-col min-h-screen">
+        <!-- Navbar -->
+        <nav class="bg-gray-800/80 border-b border-gray-700 p-4 flex justify-between items-center h-16 shrink-0 z-20">
+            <div class="flex items-center gap-3">
+                <i class="fab fa-python text-3xl text-yellow-400"></i>
+                <h1 class="text-xl font-bold tracking-wide">Py<span class="text-blue-500">Stream</span></h1>
             </div>
-        </main>
-
-        <!-- Chat -->
-        <aside class="w-80 bg-gray-800 border-l border-gray-700 flex flex-col shrink-0">
-            <div class="p-3 border-b border-gray-700 font-bold text-gray-300 text-center">CHAT LIVE</div>
-            <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-2 text-sm"></div>
-
-            <div class="p-3 bg-gray-700">
-                <form id="chat-form" class="flex gap-2">
-                    <input type="text" id="message-input" placeholder="Scrivi..." class="w-full bg-gray-900 text-white rounded px-3 py-2 focus:outline-none border border-gray-600">
-                    <button type="submit" class="bg-blue-600 px-3 rounded hover:bg-blue-500"><i class="fas fa-paper-plane"></i></button>
+            <div class="flex items-center gap-4">
+                
+                <!-- Bottone per controllare la Live -->
+                <form action="/toggle_stream" method="POST">
+                    {% if is_live %}
+                        <button type="submit" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-full text-sm font-bold transition animate-pulse shadow-red-500/50 shadow-lg">
+                            <i class="fas fa-stop-circle"></i> Ferma Live
+                        </button>
+                    {% else %}
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-full text-sm font-bold transition shadow-green-500/50 shadow-lg">
+                            <i class="fas fa-video"></i> Avvia Live
+                        </button>
+                    {% endif %}
                 </form>
-            </div>
 
-            <div class="p-4 border-t border-gray-600 bg-gray-800">
-                <h3 class="text-yellow-400 font-bold mb-2 text-center">Supporta lo Stream</h3>
-                <div class="grid grid-cols-3 gap-2">
-                    <button onclick="sendTip(5)" class="bg-gray-700 hover:bg-green-600 text-green-400 font-bold py-2 rounded border border-green-500/30">5€</button>
-                    <button onclick="sendTip(10)" class="bg-gray-700 hover:bg-blue-600 text-blue-400 font-bold py-2 rounded border border-blue-500/30">10€</button>
-                    <button onclick="sendTip(50)" class="bg-gray-700 hover:bg-purple-600 text-purple-400 font-bold py-2 rounded border border-purple-500/30">50€</button>
-                </div>
+                <div class="h-6 w-px bg-gray-600 mx-2"></div>
+                
+                <span class="text-gray-300 text-sm">Ciao, <span class="font-bold text-white">{{ username }}</span>!</span>
+                <a href="/logout" class="text-gray-400 hover:text-white text-sm font-bold transition"><i class="fas fa-sign-out-alt"></i> Logout</a>
             </div>
-        </aside>
+        </nav>
+
+        <!-- Main Layout -->
+        <div class="flex flex-1 overflow-hidden">
+            
+            <!-- Video Area -->
+            <main class="flex-1 flex flex-col bg-black relative">
+                <div id="video-container" class="relative w-full h-full flex items-center justify-center bg-gray-900 overflow-hidden">
+                    
+                    <!-- SEZIONE VIDEO -->
+                    {% if is_live %}
+                        <img src="{{ url_for('video_feed') }}" alt="Live Stream">
+                        
+                        <!-- Badge LIVE -->
+                        <div class="absolute top-4 left-4 bg-red-600 text-white px-3 py-1 rounded-full font-bold text-xs tracking-wider shadow-xl animate-pulse">
+                            🔴 LIVE
+                        </div>
+                    {% else %}
+                        <!-- Schermata Offline -->
+                        <div class="text-center offline-screen bg-gray-900/50 p-10 rounded-xl shadow-2xl backdrop-blur-sm">
+                            <i class="fas fa-video-slash text-7xl text-gray-700 mb-4"></i>
+                            <p class="text-gray-300 text-2xl font-light">Lo streamer è offline</p>
+                            <p class="text-gray-500 text-sm mt-2">La trasmissione inizierà a breve...</p>
+                        </div>
+                    {% endif %}
+
+                    <div id="tip-overlay" class="absolute top-10 right-10 w-80 z-50 pointer-events-none"></div>
+                </div>
+            </main>
+
+            <!-- Chat -->
+            <aside class="w-80 bg-gray-800/90 border-l border-gray-700 flex flex-col shrink-0 shadow-2xl z-10">
+                <div class="p-3 border-b border-gray-700 font-bold text-gray-300 text-center bg-gray-800">CHAT LIVE</div>
+                <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-2 text-sm"></div>
+
+                <div class="p-3 bg-gray-700">
+                    <form id="chat-form" class="flex gap-2">
+                        <input type="text" id="message-input" placeholder="Scrivi..." class="w-full bg-gray-900 text-white rounded-full px-4 py-2 focus:outline-none border border-gray-600 focus:border-blue-500 transition">
+                        <button type="submit" class="bg-blue-600 w-10 h-10 rounded-full hover:bg-blue-500 transition shadow-md shrink-0"><i class="fas fa-paper-plane"></i></button>
+                    </form>
+                </div>
+
+                <div class="p-4 border-t border-gray-600 bg-gray-800">
+                    <h3 class="text-yellow-400 font-bold mb-2 text-center text-xs uppercase tracking-widest">Supporta lo Stream</h3>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="sendTip(5)" class="bg-gray-700 hover:bg-green-600 text-green-400 hover:text-white font-bold py-2 rounded-xl border border-green-500/30 transition duration-200 shadow-lg">5€</button>
+                        <button onclick="sendTip(10)" class="bg-gray-700 hover:bg-blue-600 text-blue-400 hover:text-white font-bold py-2 rounded-xl border border-blue-500/30 transition duration-200 shadow-lg">10€</button>
+                        <button onclick="sendTip(50)" class="bg-gray-700 hover:bg-purple-600 text-purple-400 hover:text-white font-bold py-2 rounded-xl border border-purple-500/30 transition duration-200 shadow-lg">50€</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
     </div>
 
     <script>
         const socket = io();
         const chatBox = document.getElementById('chat-box');
+
+        // Gestione cambio stato stream (Ricarica la pagina per mostrare/nascondere video)
+        socket.on('stream_status', (data) => {
+            setTimeout(() => location.reload(), 1000);
+        });
 
         socket.on('new_message', (data) => {
             const div = document.createElement('div');
@@ -80,7 +139,7 @@
 
         socket.on('new_tip', (data) => {
             const div = document.createElement('div');
-            div.className = "bg-yellow-500/10 border border-yellow-500/50 p-2 rounded my-2";
+            div.className = "bg-yellow-500/10 border border-yellow-500/50 p-2 rounded my-2 animate-pulse shadow-md";
             div.innerHTML = `<p class="text-yellow-400 font-bold text-center">💎 ${data.username} ha donato ${data.amount}€!</p>`;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
@@ -101,8 +160,8 @@
         function showOverlayNotification(user, amount) {
             const overlay = document.getElementById('tip-overlay');
             const notif = document.createElement('div');
-            notif.className = "bg-gradient-to-r from-purple-600 to-blue-600 p-4 rounded-xl shadow-2xl mb-4 text-center border-2 border-white tip-animation";
-            notif.innerHTML = `<h3 class="text-2xl font-bold text-white">NUOVA DONAZIONE!</h3><p class="text-xl text-yellow-300 mt-1">${user}</p><p class="text-4xl font-black text-white mt-2">${amount}€</p>`;
+            notif.className = "bg-gradient-to-r from-purple-600 to-blue-600 p-4 rounded-xl shadow-2xl mb-4 text-center border-2 border-white tip-animation backdrop-blur-sm";
+            notif.innerHTML = `<h3 class="text-2xl font-bold text-white drop-shadow-md">NUOVA DONAZIONE!</h3><p class="text-xl text-yellow-300 mt-1 font-bold">${user}</p><p class="text-5xl font-black text-white mt-2 drop-shadow-lg">${amount}€</p>`;
             overlay.appendChild(notif);
             setTimeout(() => { notif.style.opacity = '0'; setTimeout(() => notif.remove(), 500); }, 5000);
         }
