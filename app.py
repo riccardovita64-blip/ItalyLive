@@ -1,6 +1,6 @@
 import os
 import random
-import sys # Aggiunto per forzare la stampa dei log
+import sys
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -10,7 +10,7 @@ from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired
 import cv2
 
-# Funzione per forzare la stampa immediata nei log di Render
+# Funzione per loggare su Render
 def log(message):
     print(message, file=sys.stdout, flush=True)
 
@@ -26,13 +26,13 @@ if database_url and database_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- CONFIGURAZIONE EMAIL ---
+# --- CONFIGURAZIONE EMAIL (NUOVA: PORTA 465 SSL) ---
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_PORT'] = 465          # CAMBIATO: Porta SSL sicura
+app.config['MAIL_USE_TLS'] = False     # CAMBIATO: Disabilitato TLS vecchio
+app.config['MAIL_USE_SSL'] = True      # CAMBIATO: Abilitato SSL puro
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEBUG'] = True 
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -61,9 +61,9 @@ def load_user(user_id):
 with app.app_context():
     try:
         db.create_all()
-        log("✅ Database inizializzato correttamente.")
+        log("✅ Database inizializzato.")
     except Exception as e:
-        log(f"❌ Errore Database all'avvio: {e}")
+        log(f"❌ Errore Database: {e}")
 
 # --- GESTIONE CAMERA ---
 streaming_active = False
@@ -80,29 +80,26 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- INVIO MAIL (CON DEBUG) ---
+# --- INVIO MAIL ---
 def send_confirmation_email(user_email):
-    log(f"📧 Preparazione invio mail a: {user_email}")
-    
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
-    log(f"🔗 LINK DEBUG: {confirm_url}")
+    # Link di backup nei log
+    log(f"\n🔗 LINK ATTIVAZIONE (Backup): {confirm_url}\n")
 
     if app.config['MAIL_USERNAME']:
         try:
-            log(f"...Connessione a Gmail come {app.config['MAIL_USERNAME']}...")
             msg = Message('Conferma Account PyStream', 
                           sender=app.config['MAIL_USERNAME'], 
                           recipients=[user_email])
             msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
             mail.send(msg)
-            log("✅ MAIL INVIATA AL SERVER SMTP.")
+            log("✅ MAIL INVIATA CORRETTAMENTE (SSL 465).")
         except Exception as e:
             log(f"❌ ERRORE INVIO MAIL: {e}")
-            # Non facciamo 'raise' qui per permettere al sito di continuare
     else:
-        log("⚠️ Variabile MAIL_USERNAME non trovata. Invio saltato.")
+        log("⚠️ Mail non configurata su Render.")
 
 @app.after_request
 def add_header(response):
@@ -124,7 +121,20 @@ def video_feed():
 @app.route('/toggle_stream', methods=['POST'])
 @login_required
 def toggle_stream():
-    # ... (codice streaming invariato) ...
+    global streaming_active, camera
+    if not streaming_active:
+        try:
+            camera = cv2.VideoCapture(0)
+            if not camera.isOpened():
+                flash("Nessuna webcam trovata.", "error")
+                return redirect(url_for('index'))
+            streaming_active = True
+            socketio.emit('stream_status', {'status': 'live'})
+        except: flash("Errore webcam", "error")
+    else:
+        streaming_active = False
+        if camera: camera.release(); camera = None
+        socketio.emit('stream_status', {'status': 'offline'})
     return redirect(url_for('index'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -132,27 +142,22 @@ def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
     
     if request.method == 'POST':
-        # LOG DI DEBUG: Vediamo se la richiesta arriva
-        log(f"📥 RICEVUTA RICHIESTA POST SU /LOGIN. Dati: {request.form.get('action')} - {request.form.get('username')}")
-        
         action = request.form.get('action')
-        username = request.form.get('username')
-        password = request.form.get('password')
-
+        
         if action == 'register':
+            username = request.form.get('username')
             email = request.form.get('email')
-            log("...Inizio procedura registrazione...")
+            password = request.form.get('password')
 
             if User.query.filter_by(email=email).first():
                 flash('Email già usata', 'error')
-                log("...Errore: Email duplicata.")
                 return redirect(url_for('login'))
             
             if User.query.filter_by(username=username).first():
                 flash('Username già preso', 'error')
-                log("...Errore: Username duplicato.")
                 return redirect(url_for('login'))
 
+            # Creazione Utente
             try:
                 new_user = User(
                     username=username,
@@ -162,26 +167,21 @@ def login():
                     confirmed=False
                 )
                 db.session.add(new_user)
+                db.session.commit() 
                 
-                log("...Utente aggiunto alla sessione DB, invio mail...")
                 send_confirmation_email(email)
-                
-                log("...Mail gestita, eseguo commit DB...")
-                db.session.commit()
-                log("✅ Registrazione completata con successo!")
                 
                 flash('Registrazione ok! Controlla la mail.', 'info')
                 return redirect(url_for('login'))
                 
             except Exception as e:
                 db.session.rollback()
-                log(f"❌ ERRORE CRITICO DURANTE REGISTRAZIONE: {e}")
-                flash('Errore server. Riprova.', 'error')
+                log(f"❌ Errore critico DB: {e}")
+                flash('Errore del server. Riprova.', 'error')
 
         elif action == 'login':
-            # ... (logica login invariata) ...
-            user = User.query.filter_by(username=username).first()
-            if user and check_password_hash(user.password, password):
+            user = User.query.filter_by(username=request.form.get('username')).first()
+            if user and check_password_hash(user.password, request.form.get('password')):
                 if not user.confirmed:
                     flash('Account non attivo! Conferma la mail.', 'warning')
                 else:
