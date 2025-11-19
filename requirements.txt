@@ -1,0 +1,8 @@
+flask
+flask-socketio
+flask-sqlalchemy
+flask-login
+opencv-python-headless
+eventlet
+gunicorn
+psycopg2-binary
