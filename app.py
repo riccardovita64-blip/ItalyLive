@@ -27,7 +27,11 @@ app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_DEBUG'] = True if not os.environ.get('MAIL_USERNAME') else False
+# DEBUG: Stampiamo se le credenziali sono state caricate (senza mostrarle per sicurezza)
+if app.config['MAIL_USERNAME'] and app.config['MAIL_PASSWORD']:
+    print(f"✅ CONFIGURAZIONE EMAIL: Trovata! User: {app.config['MAIL_USERNAME']}")
+else:
+    print("⚠️ CONFIGURAZIONE EMAIL: Credenziali MANCANTI. Le mail non partiranno.")
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -56,7 +60,7 @@ def load_user(user_id):
 with app.app_context():
     db.create_all()
 
-# --- GESTIONE CAMERA (omessa per brevità) ---
+# --- GESTIONE CAMERA ---
 streaming_active = False
 camera = None
 
@@ -71,22 +75,30 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- INVIO MAIL ---
+# --- INVIO MAIL (CON DIAGNOSTICA) ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
+    # Link di debug sempre visibile
     print(f"\n🔗 LINK ATTIVAZIONE (Debug): {confirm_url}\n")
 
-    if app.config['MAIL_USERNAME']:
-        try:
-            msg = Message('Conferma Account PyStream', 
-                          sender=app.config['MAIL_USERNAME'], 
-                          recipients=[user_email])
-            msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
-            mail.send(msg)
-        except Exception as e:
-            print(f"Errore invio mail: {e}. L'utente dovrà usare il link manuale.")
+    # Controllo Credenziali
+    if not app.config['MAIL_USERNAME'] or not app.config['MAIL_PASSWORD']:
+        print("❌ ERRORE: Impossibile inviare mail. Variabili d'ambiente MAIL_USERNAME o MAIL_PASSWORD mancanti.")
+        return
+
+    try:
+        print(f"📧 Tentativo invio mail a: {user_email} da {app.config['MAIL_USERNAME']}...")
+        msg = Message('Conferma Account PyStream', 
+                      sender=app.config['MAIL_USERNAME'], 
+                      recipients=[user_email])
+        msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
+        mail.send(msg)
+        print("✅ EMAIL INVIATA CON SUCCESSO (Controlla Posta o Spam)")
+    except Exception as e:
+        print(f"❌ ERRORE CRITICO SMTP: {e}")
+        print("Suggerimento: Controlla se la Password per le App è corretta e se la 2FA è attiva su Gmail.")
 
 @app.after_request
 def add_header(response):
@@ -136,56 +148,36 @@ def login():
             email = request.form.get('email')
             password = request.form.get('password')
 
-            # --- Iniziamo la logica di controllo ---
-            
-            # Controllo 1: Email già usata?
             if User.query.filter_by(email=email).first():
                 flash('Email già usata', 'error')
-                return redirect(url_for('login'))
-            
-            # Controllo 2: Username già preso?
-            if User.query.filter_by(username=username).first():
+            elif User.query.filter_by(username=username).first():
                 flash('Username già preso', 'error')
-                return redirect(url_for('login'))
-
-            # Se i controlli base sono passati, creiamo il record in memoria
-            new_user = User(
-                username=username,
-                email=email,
-                password=generate_password_hash(password, method='pbkdf2:sha256'),
-                color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
-                confirmed=False
-            )
-            
-            # Aggiungiamo l'utente alla sessione del DB (ma NON lo salviamo in modo definitivo)
-            db.session.add(new_user)
-            
-            # *** FIX: Avvolgiamo la logica finale in un blocco try/except ***
-            try:
-                # Tentiamo di inviare la mail
-                send_confirmation_email(email)
+            else:
+                new_user = User(
+                    username=username,
+                    email=email,
+                    password=generate_password_hash(password, method='pbkdf2:sha256'),
+                    color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
+                    confirmed=False
+                )
+                db.session.add(new_user)
                 
-                # Se la mail va bene (o il link è stampato), salviamo in modo DEFINITIVO
-                db.session.commit() 
-                
-                flash('Registrazione ok! Controlla la mail (o i log) per attivare l\'account.', 'info')
-                return redirect(url_for('login'))
-                
-            except Exception as e:
-                # Se l'invio della mail fallisce (es. errore SMTP/timeout) o se c'è un altro errore
-                
-                # ANNULLIAMO la creazione del record! (Rollback)
-                db.session.rollback() 
-                print(f"ERRORE CRITICO: Transazione annullata. {e}")
-                
-                flash('Errore durante la registrazione. Riprova più tardi.', 'error')
-                return redirect(url_for('login'))
-
+                # Proviamo a inviare la mail PRIMA di confermare il salvataggio
+                # Ma non blocchiamo il salvataggio se la mail fallisce (per ora)
+                try:
+                    send_confirmation_email(email)
+                    db.session.commit()
+                    flash('Registrazione ok! Controlla la mail (o i log se sei l\'admin).', 'info')
+                    return redirect(url_for('login'))
+                except Exception as e:
+                    db.session.rollback()
+                    print(f"Errore transazione: {e}")
+                    flash('Errore tecnico registrazione.', 'error')
 
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if not user or not check_password_hash(user.password, request.form.get('password')):
-                flash('Credenziali sbagliate. Riprova.', 'error')
+                flash('Dati errati', 'error')
             elif not user.confirmed:
                 flash('Account non attivo! Conferma la mail.', 'warning')
             else:
