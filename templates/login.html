@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accedi a PyStream</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>.hidden { display: none; }</style>
+</head>
+<body class="bg-gray-900 text-white h-screen flex items-center justify-center">
+
+    <div class="bg-gray-800 p-8 rounded-lg shadow-2xl w-96 border border-gray-700">
+        <div class="text-center mb-6">
+            <i class="fab fa-python text-5xl text-yellow-400 mb-2"></i>
+            <h1 class="text-2xl font-bold">Py<span class="text-blue-500">Stream</span></h1>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="p-3 rounded mb-4 text-sm text-center border 
+                    {% if category == 'error' %} bg-red-500/20 border-red-500 text-red-200
+                    {% else %} bg-blue-500/20 border-blue-500 text-blue-200 {% endif %}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="flex justify-center mb-6 bg-gray-700 rounded p-1">
+            <button onclick="toggleMode('login')" id="btn-login" class="w-1/2 py-1 rounded text-sm font-bold bg-blue-600 text-white">Login</button>
+            <button onclick="toggleMode('register')" id="btn-register" class="w-1/2 py-1 rounded text-sm font-bold text-gray-400">Registrati</button>
+        </div>
+
+        <form method="POST" action="/login">
+            <div class="mb-4">
+                <label class="block text-gray-400 text-xs font-bold mb-1">USERNAME</label>
+                <input type="text" name="username" required class="w-full bg-gray-900 border border-gray-600 rounded py-2 px-3 focus:border-blue-500 outline-none">
+            </div>
+            <div class="mb-6">
+                <label class="block text-gray-400 text-xs font-bold mb-1">PASSWORD</label>
+                <input type="password" name="password" required class="w-full bg-gray-900 border border-gray-600 rounded py-2 px-3 focus:border-blue-500 outline-none">
+            </div>
+            <button type="submit" name="action" value="login" id="submit-btn" class="w-full bg-blue-600 hover:bg-blue-700 font-bold py-2 px-4 rounded transition">ACCEDI</button>
+        </form>
+    </div>
+
+    <script>
+        function toggleMode(mode) {
+            const submitBtn = document.getElementById('submit-btn');
+            const btnLogin = document.getElementById('btn-login');
+            const btnRegister = document.getElementById('btn-register');
+
+            if (mode === 'register') {
+                submitBtn.innerText = "CREA ACCOUNT";
+                submitBtn.value = "register";
+                submitBtn.className = "w-full bg-green-600 hover:bg-green-700 font-bold py-2 px-4 rounded transition";
+                btnRegister.className = "w-1/2 py-1 rounded text-sm font-bold bg-gray-600 text-white";
+                btnLogin.className = "w-1/2 py-1 rounded text-sm font-bold text-gray-400";
+            } else {
+                submitBtn.innerText = "ACCEDI";
+                submitBtn.value = "login";
+                submitBtn.className = "w-full bg-blue-600 hover:bg-blue-700 font-bold py-2 px-4 rounded transition";
+                btnLogin.className = "w-1/2 py-1 rounded text-sm font-bold bg-blue-600 text-white";
+                btnRegister.className = "w-1/2 py-1 rounded text-sm font-bold text-gray-400";
+            }
+        }
+    </script>
+</body>
+</html>
