@@ -26,13 +26,18 @@ if database_url and database_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- CONFIGURAZIONE EMAIL (NUOVA: PORTA 465 SSL) ---
+# --- CONFIGURAZIONE EMAIL (BLINDATA) ---
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 465          # CAMBIATO: Porta SSL sicura
-app.config['MAIL_USE_TLS'] = False     # CAMBIATO: Disabilitato TLS vecchio
-app.config['MAIL_USE_SSL'] = True      # CAMBIATO: Abilitato SSL puro
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
+app.config['MAIL_PORT'] = 465          # Porta SSL sicura
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
+
+# .strip() rimuove spazi vuoti per sbaglio all'inizio o alla fine
+mail_user = os.environ.get('MAIL_USERNAME')
+mail_pass = os.environ.get('MAIL_PASSWORD')
+
+app.config['MAIL_USERNAME'] = mail_user.strip() if mail_user else None
+app.config['MAIL_PASSWORD'] = mail_pass.strip() if mail_pass else None
 
 db = SQLAlchemy(app)
 mail = Mail(app)
@@ -88,18 +93,31 @@ def send_confirmation_email(user_email):
     # Link di backup nei log
     log(f"\n🔗 LINK ATTIVAZIONE (Backup): {confirm_url}\n")
 
-    if app.config['MAIL_USERNAME']:
+    if app.config['MAIL_USERNAME'] and app.config['MAIL_PASSWORD']:
         try:
+            # Impostiamo un mittente con Nome + Email per evitare lo spam
+            sender_info = ('PyStream Support', app.config['MAIL_USERNAME'])
+            
             msg = Message('Conferma Account PyStream', 
-                          sender=app.config['MAIL_USERNAME'], 
+                          sender=sender_info, 
                           recipients=[user_email])
-            msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
+            
+            msg.body = f'Benvenuto!\n\nClicca qui per attivare il tuo account: {confirm_url}\n\nSe non hai richiesto questo account, ignora questa email.'
+            msg.html = f'''
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                <h2 style="color: #2563eb;">Benvenuto su PyStream!</h2>
+                <p>Grazie per esserti registrato. Per iniziare a guardare le live, conferma la tua email.</p>
+                <a href="{confirm_url}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin-top: 10px;">Conferma Email</a>
+                <p style="margin-top: 20px; font-size: 12px; color: #666;">Se il bottone non funziona, copia questo link: {confirm_url}</p>
+            </div>
+            '''
+            
             mail.send(msg)
-            log("✅ MAIL INVIATA CORRETTAMENTE (SSL 465).")
+            log(f"✅ MAIL INVIATA CORRETTAMENTE a {user_email} (SSL 465).")
         except Exception as e:
             log(f"❌ ERRORE INVIO MAIL: {e}")
     else:
-        log("⚠️ Mail non configurata su Render.")
+        log("⚠️ Mail non configurata su Render (Variabili mancanti).")
 
 @app.after_request
 def add_header(response):
@@ -157,7 +175,6 @@ def login():
                 flash('Username già preso', 'error')
                 return redirect(url_for('login'))
 
-            # Creazione Utente
             try:
                 new_user = User(
                     username=username,
