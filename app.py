@@ -76,10 +76,8 @@ def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
-    # Stampa sempre il link nei log di Render/VS Code
     print(f"\n🔗 LINK ATTIVAZIONE (Debug): {confirm_url}\n")
 
-    # Invia la mail reale solo se le credenziali sono configurate
     if app.config['MAIL_USERNAME']:
         try:
             msg = Message('Conferma Account PyStream', 
@@ -88,7 +86,6 @@ def send_confirmation_email(user_email):
             msg.body = f'Clicca qui per attivare il tuo account: {confirm_url}'
             mail.send(msg)
         except Exception as e:
-            # Non bloccare l'utente se l'invio fallisce (potrebbe essere problema di credenziali)
             print(f"Errore invio mail: {e}. L'utente dovrà usare il link manuale.")
 
 @app.after_request
@@ -139,25 +136,49 @@ def login():
             email = request.form.get('email')
             password = request.form.get('password')
 
+            # --- Iniziamo la logica di controllo ---
+            
+            # Controllo 1: Email già usata?
             if User.query.filter_by(email=email).first():
                 flash('Email già usata', 'error')
-            elif User.query.filter_by(username=username).first():
+                return redirect(url_for('login'))
+            
+            # Controllo 2: Username già preso?
+            if User.query.filter_by(username=username).first():
                 flash('Username già preso', 'error')
-            else:
-                new_user = User(
-                    username=username,
-                    email=email,
-                    # Password criptata
-                    password=generate_password_hash(password, method='pbkdf2:sha256'),
-                    color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
-                    confirmed=False # <--- L'utente è inattivo
-                )
-                db.session.add(new_user)
-                db.session.commit()
+                return redirect(url_for('login'))
+
+            # Se i controlli base sono passati, creiamo il record in memoria
+            new_user = User(
+                username=username,
+                email=email,
+                password=generate_password_hash(password, method='pbkdf2:sha256'),
+                color=random.choice(['#ef4444', '#3b82f6', '#10b981']),
+                confirmed=False
+            )
+            
+            # Aggiungiamo l'utente alla sessione del DB (ma NON lo salviamo in modo definitivo)
+            db.session.add(new_user)
+            
+            # *** FIX: Avvolgiamo la logica finale in un blocco try/except ***
+            try:
+                # Tentiamo di inviare la mail
                 send_confirmation_email(email)
                 
-                # *** FIX CRITICO: Non fare il login qui! ***
+                # Se la mail va bene (o il link è stampato), salviamo in modo DEFINITIVO
+                db.session.commit() 
+                
                 flash('Registrazione ok! Controlla la mail (o i log) per attivare l\'account.', 'info')
+                return redirect(url_for('login'))
+                
+            except Exception as e:
+                # Se l'invio della mail fallisce (es. errore SMTP/timeout) o se c'è un altro errore
+                
+                # ANNULLIAMO la creazione del record! (Rollback)
+                db.session.rollback() 
+                print(f"ERRORE CRITICO: Transazione annullata. {e}")
+                
+                flash('Errore durante la registrazione. Riprova più tardi.', 'error')
                 return redirect(url_for('login'))
 
 
@@ -166,7 +187,7 @@ def login():
             if not user or not check_password_hash(user.password, request.form.get('password')):
                 flash('Credenziali sbagliate. Riprova.', 'error')
             elif not user.confirmed:
-                flash('Account non attivo! Conferma la mail.', 'warning') # <--- Blocco qui l'accesso
+                flash('Account non attivo! Conferma la mail.', 'warning')
             else:
                 login_user(user)
                 return redirect(url_for('index'))
@@ -176,7 +197,6 @@ def login():
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try:
-        # Il token è valido per un'ora (3600 secondi)
         email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
     except:
         flash('Link scaduto o non valido.', 'error')
