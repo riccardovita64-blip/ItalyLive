@@ -21,56 +21,66 @@
             min-height: 100vh;
         }
         .login-card {
-            background-color: rgba(13, 17, 23, 0.85); 
-            backdrop-filter: blur(8px);
-            border: 1px solid #eab30840; /* Bordo Giallo/Oro */
+            background-color: rgba(13, 17, 23, 0.75); /* Più scuro e trasparente */
+            backdrop-filter: blur(12px); /* Sfocatura maggiore per eleganza */
+            border: 1px solid rgba(255, 255, 255, 0.1); /* Bordo sottile e neutro */
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); /* Ombra profonda */
         }
         .hidden { display: none; }
+        
+        /* Animazione fade per i campi */
+        .fade-in { animation: fadeIn 0.4s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
-<body class="text-white">
+<body class="text-gray-100">
 
-    <div class="login-card p-8 rounded-xl shadow-2xl w-96 border transition-all duration-300">
-        <div class="text-center mb-6">
-            <i class="fas fa-monument text-4xl text-yellow-500 mb-3"></i>
-            <h1 class="text-3xl font-bold">ItalyFrom<span class="text-yellow-500">Couch</span></h1>
-            <p class="text-gray-400 text-sm mt-1">Il tuo passaporto digitale</p>
+    <div class="login-card p-10 rounded-2xl w-96 transition-all duration-300">
+        <div class="text-center mb-8">
+            <i class="fas fa-monument text-4xl text-gray-200 mb-3 drop-shadow-lg"></i>
+            <h1 class="text-3xl font-bold tracking-tight text-white">ItalyFrom<span class="text-gray-400">Couch</span></h1>
+            <p class="text-gray-400 text-xs mt-2 uppercase tracking-widest">Il tuo passaporto digitale</p>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                <div class="p-3 rounded mb-4 text-sm text-center border 
-                    {% if category == 'error' %} bg-red-500/20 border-red-500 text-red-200
-                    {% else %} bg-yellow-500/20 border-yellow-500 text-yellow-200 {% endif %}">
+                <div class="p-3 rounded-lg mb-6 text-sm text-center border backdrop-blur-sm
+                    {% if category == 'error' %} bg-red-900/30 border-red-500/30 text-red-200
+                    {% else %} bg-gray-700/30 border-gray-500/30 text-gray-200 {% endif %}">
                     {{ message }}
                 </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <div class="flex justify-center mb-6 bg-gray-700 rounded-full p-1 shadow-inner">
-            <button onclick="toggleMode('login')" id="btn-login" class="w-1/2 py-2 rounded-full text-sm font-bold bg-yellow-600 text-white transition shadow-md">Accedi</button>
-            <button onclick="toggleMode('register')" id="btn-register" class="w-1/2 py-2 rounded-full text-sm font-bold text-gray-400 hover:text-white transition">Registrati</button>
+        <!-- Switch Login/Register -->
+        <div class="flex justify-center mb-8 bg-black/40 rounded-full p-1">
+            <button onclick="toggleMode('login')" id="btn-login" class="w-1/2 py-2 rounded-full text-sm font-bold bg-gray-700 text-white shadow-md transition-all duration-200">Accedi</button>
+            <button onclick="toggleMode('register')" id="btn-register" class="w-1/2 py-2 rounded-full text-sm font-bold text-gray-500 hover:text-gray-300 transition-all duration-200">Registrati</button>
         </div>
 
         <form method="POST" action="/login">
-            <div class="mb-4">
-                <label class="block text-gray-400 text-xs font-bold mb-1">USERNAME</label>
-                <input type="text" name="username" required class="w-full bg-gray-900 border border-gray-600 rounded-lg py-2 px-3 focus:border-yellow-500 outline-none transition focus:bg-gray-800">
-            </div>
-            
-            <div id="email-field" class="mb-4 hidden">
-                <label class="block text-gray-400 text-xs font-bold mb-1">EMAIL</label>
-                <input type="email" name="email" id="email-input" class="w-full bg-gray-900 border border-gray-600 rounded-lg py-2 px-3 focus:border-yellow-500 outline-none transition focus:bg-gray-800">
-            </div>
+            <div class="space-y-5">
+                <div>
+                    <label class="block text-gray-400 text-[10px] font-bold mb-1 uppercase tracking-wider ml-1">Username</label>
+                    <input type="text" name="username" required class="w-full bg-black/20 border border-gray-700 rounded-xl py-3 px-4 focus:border-gray-400 focus:bg-black/40 focus:ring-0 outline-none transition text-sm placeholder-gray-600">
+                </div>
+                
+                <div id="email-field" class="hidden fade-in">
+                    <label class="block text-gray-400 text-[10px] font-bold mb-1 uppercase tracking-wider ml-1">Email</label>
+                    <input type="email" name="email" id="email-input" class="w-full bg-black/20 border border-gray-700 rounded-xl py-3 px-4 focus:border-gray-400 focus:bg-black/40 focus:ring-0 outline-none transition text-sm placeholder-gray-600">
+                </div>
 
-            <div class="mb-6">
-                <label class="block text-gray-400 text-xs font-bold mb-1">PASSWORD</label>
-                <input type="password" name="password" required class="w-full bg-gray-900 border border-gray-600 rounded-lg py-2 px-3 focus:border-yellow-500 outline-none transition focus:bg-gray-800">
-            </div>
+                <div>
+                    <label class="block text-gray-400 text-[10px] font-bold mb-1 uppercase tracking-wider ml-1">Password</label>
+                    <input type="password" name="password" required class="w-full bg-black/20 border border-gray-700 rounded-xl py-3 px-4 focus:border-gray-400 focus:bg-black/40 focus:ring-0 outline-none transition text-sm placeholder-gray-600">
+                </div>
 
-            <button type="submit" name="action" value="login" id="submit-btn" class="w-full bg-yellow-600 hover:bg-yellow-700 font-bold py-3 px-4 rounded-full transition shadow-lg shadow-yellow-500/30 transform hover:scale-105">ACCEDI</button>
+                <button type="submit" name="action" value="login" id="submit-btn" class="w-full bg-gray-100 hover:bg-white text-gray-900 font-bold py-3.5 px-4 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl mt-2">
+                    ACCEDI
+                </button>
+            </div>
         </form>
     </div>
 
@@ -82,28 +92,30 @@
             const btnLogin = document.getElementById('btn-login');
             const btnRegister = document.getElementById('btn-register');
 
+            // Classi per stato Attivo vs Inattivo
+            const activeClass = "bg-gray-700 text-white shadow-md";
+            const inactiveClass = "text-gray-500 hover:text-gray-300 bg-transparent shadow-none";
+
             if (mode === 'register') {
+                // Mostra campi registrazione
                 emailField.classList.remove('hidden');
                 emailInput.required = true;
                 submitBtn.innerText = "CREA ACCOUNT";
                 submitBtn.value = "register";
-                submitBtn.classList.replace('bg-yellow-600', 'bg-green-600');
-                submitBtn.classList.replace('hover:bg-yellow-700', 'hover:bg-green-700');
-                submitBtn.classList.replace('shadow-yellow-500/30', 'shadow-green-500/30');
-
-                btnRegister.className = "w-1/2 py-2 rounded-full text-sm font-bold bg-gray-600 text-white transition shadow-md";
-                btnLogin.className = "w-1/2 py-2 rounded-full text-sm font-bold text-gray-400 transition";
+                
+                // Aggiorna stile Toggle
+                btnRegister.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${activeClass}`;
+                btnLogin.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${inactiveClass}`;
             } else {
+                // Nascondi campi registrazione
                 emailField.classList.add('hidden');
                 emailInput.required = false;
                 submitBtn.innerText = "ACCEDI";
                 submitBtn.value = "login";
-                submitBtn.classList.replace('bg-green-600', 'bg-yellow-600');
-                submitBtn.classList.replace('hover:bg-green-700', 'hover:bg-yellow-700');
-                submitBtn.classList.replace('shadow-green-500/30', 'shadow-yellow-500/30');
 
-                btnLogin.className = "w-1/2 py-2 rounded-full text-sm font-bold bg-yellow-600 text-white transition shadow-md";
-                btnRegister.className = "w-1/2 py-2 rounded-full text-sm font-bold text-gray-400 transition";
+                // Aggiorna stile Toggle
+                btnLogin.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${activeClass}`;
+                btnRegister.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${inactiveClass}`;
             }
         }
     </script>
