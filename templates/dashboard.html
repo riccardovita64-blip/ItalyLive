@@ -65,8 +65,26 @@
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             
             {% for stream in streams %}
-            <a href="/watch/{{ stream.id }}" class="block group h-full">
-                <div class="card rounded-2xl overflow-hidden transition-all duration-300 card-hover h-full flex flex-col">
+            <!-- ... dentro il loop for ... -->
+<div class="p-5 flex-1 flex flex-col">
+    <h3 class="text-xl font-bold text-white mb-2">{{ stream.title }}</h3>
+    <p class="text-gray-400 text-sm mb-4">{{ stream.description }}</p>
+    
+    <div class="mt-auto flex justify-between items-center">
+        <!-- Bottone per TUTTI: Entra a guardare -->
+        <a href="/watch/{{ stream.id }}" class="text-yellow-500 font-bold text-sm hover:underline">
+            Entra <i class="fas fa-arrow-right"></i>
+        </a>
+
+        <!-- Bottone SOLO per GUIDE: Trasmetti -->
+        {% if user.is_streamer %}
+        <a href="/broadcast/{{ stream.id }}" class="bg-red-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-red-700">
+            <i class="fas fa-video"></i> TRASMETTI
+        </a>
+        {% endif %}
+    </div>
+</div>
+<!-- ... -->
                     <!-- Immagine -->
                     <div class="relative h-56 overflow-hidden">
                         <img src="{{ stream.image_url }}" alt="{{ stream.title }}" class="w-full h-full object-cover transition duration-700 group-hover:scale-105 opacity-90 group-hover:opacity-100">
