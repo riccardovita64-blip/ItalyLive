@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_link')
 
-# --- CONFIGURAZIONE ESTRNI ---
+# --- CONFIGURAZIONE ESTERNI ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000').strip('/')
 resend.api_key = os.environ.get('RESEND_API_KEY', '').strip()
@@ -44,7 +44,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(150), nullable=False)
     confirmed = db.Column(db.Boolean, default=False)
-    is_streamer = db.Column(db.Boolean, default=False) # Se True, può vedere il tasto "Trasmetti"
+    is_streamer = db.Column(db.Boolean, default=False)
 
 class Stream(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -52,7 +52,6 @@ class Stream(db.Model):
     description = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(300))
     is_live = db.Column(db.Boolean, default=False)
-    guide_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # Chi sta trasmettendo?
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -68,7 +67,7 @@ with app.app_context():
         db.session.add_all([s1, s2, s3])
         db.session.commit()
 
-# --- INVIO MAIL (Semplificato) ---
+# --- MAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
@@ -93,7 +92,7 @@ def add_header(response):
 @login_required
 def index():
     streams = Stream.query.all()
-    return render_template('dashboard.html', user=current_user, streams=streams) # Passo l'intero oggetto user
+    return render_template('dashboard.html', user=current_user, streams=streams)
 
 @app.route('/watch/<int:stream_id>')
 @login_required
@@ -101,65 +100,55 @@ def watch(stream_id):
     stream = Stream.query.get_or_404(stream_id)
     return render_template('stream.html', user=current_user, stream=stream)
 
-# --- NUOVA ROTTA: STUDIO DI TRASMISSIONE (Solo per Guide) ---
 @app.route('/broadcast/<int:stream_id>')
 @login_required
 def broadcast(stream_id):
     if not current_user.is_streamer:
-        flash("Non sei abilitato a trasmettere.", "error")
+        flash("Devi attivare la modalità Guida per trasmettere.", "error")
         return redirect(url_for('index'))
-    
     stream = Stream.query.get_or_404(stream_id)
     return render_template('broadcast.html', user=current_user, stream=stream)
 
-# --- ROTTA SEGRETA: DIVENTA GUIDA ---
 @app.route('/become_guide')
 @login_required
 def become_guide():
     current_user.is_streamer = True
     db.session.commit()
-    flash("Ora sei una Guida Ufficiale! Puoi trasmettere.", "success")
+    flash("Modalità Guida attivata! Ora puoi trasmettere.", "success")
     return redirect(url_for('index'))
 
-# --- SOCKETS: VIDEO RELAY ---
+# --- SOCKETS ---
 @socketio.on('join_stream')
 def on_join(data):
-    room = data['stream_id']
+    room = str(data['stream_id']) # Converti in stringa per sicurezza
     join_room(room)
-    log(f"Utente {current_user.username} entrato nella stanza {room}")
 
 @socketio.on('stream_frame')
 def on_stream_frame(data):
-    # La guida manda un frame -> Il server lo gira a tutti nella stanza
-    room = data['stream_id']
-    image_data = data['image'] # Base64 image
+    room = str(data['stream_id'])
+    image_data = data['image']
+    # Invia a tutti nella stanza tranne a chi ha mandato il frame
     emit('video_update', {'image': image_data}, room=room, include_self=False)
 
 @socketio.on('stream_status_change')
 def on_status_change(data):
-    room = data['stream_id']
+    room = str(data['stream_id'])
     is_live = data['status'] == 'live'
-    
-    # Aggiorna DB
-    stream = Stream.query.get(room)
+    stream = Stream.query.get(int(room))
     if stream:
         stream.is_live = is_live
         db.session.commit()
-    
     emit('status_update', {'is_live': is_live}, room=room)
 
-# --- CHAT & TIP ---
 @socketio.on('send_message')
 def handle_message(data):
-    room = data.get('stream_id')
-    if room:
-        emit('new_message', {'username': current_user.username, 'message': data['message']}, room=room)
+    room = str(data.get('stream_id'))
+    emit('new_message', {'username': current_user.username, 'message': data['message']}, room=room)
 
 @socketio.on('send_tip')
 def handle_tip(data):
-    room = data.get('stream_id')
-    if room:
-        emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, room=room)
+    room = str(data.get('stream_id'))
+    emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, room=room)
 
 # --- LOGIN/LOGOUT ---
 @app.route('/login', methods=['GET', 'POST'])
@@ -168,7 +157,6 @@ def login():
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'register':
-            # ... (logica registrazione invariata) ...
             username = request.form.get('username')
             email = request.form.get('email')
             password = request.form.get('password')
@@ -201,9 +189,46 @@ def logout(): logout_user(); return redirect(url_for('login'))
 @app.route('/create-checkout-session', methods=['POST'])
 @login_required
 def create_checkout_session():
-    # ... (Logica Stripe Invariata) ...
-    # Assicurati di includere la logica Stripe dal messaggio precedente se vuoi i pagamenti
-    return jsonify({'error': 'Stripe temporaneamente disabilitato per brevità'}), 500
+    try:
+        data = request.json
+        amount_eur = data.get('amount', 5)
+        stream_id = data.get('stream_id', 1)
+        
+        if not stripe.api_key: return jsonify({'error': 'Stripe non configurato'}), 500
+        
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'eur',
+                    'product_data': {'name': 'Donazione Museo'},
+                    'unit_amount': int(float(amount_eur) * 100),
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            metadata={'username': current_user.username, 'amount': amount_eur, 'stream_id': stream_id},
+            success_url=DOMAIN + '/payment/success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=DOMAIN + f'/watch/{stream_id}',
+        )
+        return jsonify({'url': checkout_session.url})
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@app.route('/payment/success')
+@login_required
+def payment_success():
+    session_id = request.args.get('session_id')
+    if session_id:
+        try:
+            session = stripe.checkout.Session.retrieve(session_id)
+            donor = session.metadata.get('username', 'Anonimo')
+            amount = session.metadata.get('amount', '0')
+            stream_id = session.metadata.get('stream_id', '1')
+            socketio.emit('new_tip', {'username': donor, 'amount': amount}, room=stream_id)
+            flash(f"Grazie {donor}!", "success")
+            return redirect(url_for('watch', stream_id=stream_id))
+        except: pass
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
