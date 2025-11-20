@@ -18,9 +18,10 @@ from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_mail import Mail, Message
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired
 import cv2
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail as SGMail
 
 def log(message):
     print(message, file=sys.stdout, flush=True)
@@ -37,19 +38,11 @@ if database_url and database_url.startswith("postgres://"):
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- EMAIL ---
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
-# Pulizia credenziali
-mail_user = os.environ.get('MAIL_USERNAME')
-mail_pass = os.environ.get('MAIL_PASSWORD')
-app.config['MAIL_USERNAME'] = mail_user.strip() if mail_user else None
-app.config['MAIL_PASSWORD'] = mail_pass.strip() if mail_pass else None
+# --- SENDGRID CONFIG ---
+app.config['SENDGRID_API_KEY'] = os.environ.get('SENDGRID_API_KEY')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@tuodominio.com')
 
 db = SQLAlchemy(app)
-mail = Mail(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -94,33 +87,59 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- INVIO MAIL ---
+# --- INVIO MAIL CON SENDGRID ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
     
     log(f"\n🔗 LINK ATTIVAZIONE (Backup): {confirm_url}\n")
 
-    if app.config['MAIL_USERNAME'] and app.config['MAIL_PASSWORD']:
-        try:
-            sender_info = ('PyStream Support', app.config['MAIL_USERNAME'])
-            msg = Message('Conferma Account PyStream', 
-                          sender=sender_info, 
-                          recipients=[user_email])
-            msg.body = f'Clicca per attivare: {confirm_url}'
-            msg.html = f'''
-            <div style="font-family: sans-serif; padding: 20px;">
-                <h2 style="color: #2563eb;">Benvenuto!</h2>
-                <p>Clicca qui sotto per confermare la tua email:</p>
-                <a href="{confirm_url}" style="background-color: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Conferma Email</a>
+    if not app.config['SENDGRID_API_KEY']:
+        log("⚠️ SendGrid non configurato. Usa il link nei log.")
+        return
+
+    try:
+        message = SGMail(
+            from_email=app.config['MAIL_DEFAULT_SENDER'],
+            to_emails=user_email,
+            subject='Conferma Account PyStream',
+            html_content=f'''
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+                    <h1 style="color: white; margin: 0;">PyStream</h1>
+                </div>
+                <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
+                    <h2 style="color: #1f2937;">Benvenuto su PyStream! 🎉</h2>
+                    <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
+                        Grazie per esserti registrato. Clicca sul pulsante qui sotto per confermare il tuo indirizzo email e iniziare a usare la piattaforma.
+                    </p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{confirm_url}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; font-size: 16px;">
+                            Conferma Email
+                        </a>
+                    </div>
+                    <p style="color: #6b7280; font-size: 14px;">
+                        Se non hai creato un account, ignora questa email.
+                    </p>
+                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                    <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+                        Questo link scade tra 1 ora.
+                    </p>
+                </div>
             </div>
             '''
-            mail.send(msg)
-            log(f"✅ MAIL INVIATA A {user_email}")
-        except Exception as e:
-            log(f"❌ ERRORE INVIO MAIL: {e}")
-    else:
-        log("⚠️ Mail non configurata su Render.")
+        )
+        
+        sg = SendGridAPIClient(app.config['SENDGRID_API_KEY'])
+        response = sg.send(message)
+        
+        if response.status_code == 202:
+            log(f"✅ EMAIL INVIATA CON SUCCESSO a {user_email}")
+        else:
+            log(f"⚠️ SendGrid status code: {response.status_code}")
+            
+    except Exception as e:
+        log(f"❌ ERRORE INVIO EMAIL: {e}")
 
 @app.after_request
 def add_header(response):
