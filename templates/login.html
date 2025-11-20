@@ -1,15 +1,14 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accedi - ItalyFromCouch</title>
+    <title>Login - ItalyFromCouch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
             background-color: #0d1117; 
-            /* Immagine di Piazza San Pietro (Roma) */
             background-image: url('https://images.unsplash.com/photo-1515542622106-78bda8ba0e5b'); 
             background-size: cover;
             background-position: center;
@@ -21,14 +20,12 @@
             min-height: 100vh;
         }
         .login-card {
-            background-color: rgba(13, 17, 23, 0.75); /* Più scuro e trasparente */
-            backdrop-filter: blur(12px); /* Sfocatura maggiore per eleganza */
-            border: 1px solid rgba(255, 255, 255, 0.1); /* Bordo sottile e neutro */
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); /* Ombra profonda */
+            background-color: rgba(13, 17, 23, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
         .hidden { display: none; }
-        
-        /* Animazione fade per i campi */
         .fade-in { animation: fadeIn 0.4s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
@@ -39,7 +36,7 @@
         <div class="text-center mb-8">
             <i class="fas fa-monument text-4xl text-gray-200 mb-3 drop-shadow-lg"></i>
             <h1 class="text-3xl font-bold tracking-tight text-white">ItalyFrom<span class="text-gray-400">Couch</span></h1>
-            <p class="text-gray-400 text-xs mt-2 uppercase tracking-widest">Il tuo passaporto digitale</p>
+            <p class="text-gray-400 text-xs mt-2 uppercase tracking-widest">Your Digital Passport</p>
         </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -54,10 +51,9 @@
             {% endif %}
         {% endwith %}
 
-        <!-- Switch Login/Register -->
         <div class="flex justify-center mb-8 bg-black/40 rounded-full p-1">
-            <button onclick="toggleMode('login')" id="btn-login" class="w-1/2 py-2 rounded-full text-sm font-bold bg-gray-700 text-white shadow-md transition-all duration-200">Accedi</button>
-            <button onclick="toggleMode('register')" id="btn-register" class="w-1/2 py-2 rounded-full text-sm font-bold text-gray-500 hover:text-gray-300 transition-all duration-200">Registrati</button>
+            <button onclick="toggleMode('login')" id="btn-login" class="w-1/2 py-2 rounded-full text-sm font-bold bg-gray-700 text-white shadow-md transition-all duration-200">Login</button>
+            <button onclick="toggleMode('register')" id="btn-register" class="w-1/2 py-2 rounded-full text-sm font-bold text-gray-500 hover:text-gray-300 transition-all duration-200">Sign Up</button>
         </div>
 
         <form method="POST" action="/login">
@@ -78,7 +74,7 @@
                 </div>
 
                 <button type="submit" name="action" value="login" id="submit-btn" class="w-full bg-gray-100 hover:bg-white text-gray-900 font-bold py-3.5 px-4 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl mt-2">
-                    ACCEDI
+                    LOGIN
                 </button>
             </div>
         </form>
@@ -92,28 +88,23 @@
             const btnLogin = document.getElementById('btn-login');
             const btnRegister = document.getElementById('btn-register');
 
-            // Classi per stato Attivo vs Inattivo
             const activeClass = "bg-gray-700 text-white shadow-md";
             const inactiveClass = "text-gray-500 hover:text-gray-300 bg-transparent shadow-none";
 
             if (mode === 'register') {
-                // Mostra campi registrazione
                 emailField.classList.remove('hidden');
                 emailInput.required = true;
-                submitBtn.innerText = "CREA ACCOUNT";
+                submitBtn.innerText = "CREATE ACCOUNT";
                 submitBtn.value = "register";
                 
-                // Aggiorna stile Toggle
                 btnRegister.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${activeClass}`;
                 btnLogin.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${inactiveClass}`;
             } else {
-                // Nascondi campi registrazione
                 emailField.classList.add('hidden');
                 emailInput.required = false;
-                submitBtn.innerText = "ACCEDI";
+                submitBtn.innerText = "LOGIN";
                 submitBtn.value = "login";
 
-                // Aggiorna stile Toggle
                 btnLogin.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${activeClass}`;
                 btnRegister.className = `w-1/2 py-2 rounded-full text-sm font-bold transition-all duration-200 ${inactiveClass}`;
             }
