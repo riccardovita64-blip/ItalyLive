@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Studio Live - {{ stream.title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>body { background-color: #111; color: white; font-family: sans-serif; }</style>
+</head>
+<body class="flex flex-col h-screen items-center justify-center">
+
+    <div class="absolute top-4 left-4 bg-red-600 px-3 py-1 rounded font-bold animate-pulse hidden" id="live-badge">IN ONDA</div>
+    
+    <h1 class="text-2xl mb-4">🎥 Studio: {{ stream.title }}</h1>
+
+    <!-- Preview Video Locale -->
+    <div class="relative w-[800px] aspect-video bg-black rounded-lg overflow-hidden border border-gray-700">
+        <video id="localVideo" autoplay muted class="w-full h-full object-cover"></video>
+        <!-- Canvas nascosto per catturare i frame -->
+        <canvas id="canvas" class="hidden"></canvas>
+    </div>
+
+    <div class="mt-8 flex gap-4">
+        <button onclick="startStreaming()" id="btn-start" class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-full font-bold text-lg transition">
+            GO LIVE 📡
+        </button>
+        <button onclick="stopStreaming()" id="btn-stop" class="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-full font-bold text-lg transition hidden">
+            STOP 🛑
+        </button>
+        <a href="/" class="bg-gray-700 px-6 py-3 rounded-full">Esci</a>
+    </div>
+
+    <script>
+        const socket = io();
+        const streamId = {{ stream.id }};
+        const video = document.getElementById('localVideo');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        let streamingInterval = null;
+
+        // 1. Ottieni accesso alla Webcam locale
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+            .then(stream => {
+                video.srcObject = stream;
+            })
+            .catch(err => alert("Errore Webcam: " + err));
+
+        // 2. Avvia Trasmissione
+        function startStreaming() {
+            socket.emit('stream_status_change', { stream_id: streamId, status: 'live' });
+            document.getElementById('btn-start').classList.add('hidden');
+            document.getElementById('btn-stop').classList.remove('hidden');
+            document.getElementById('live-badge').classList.remove('hidden');
+
+            // Invia frame 15 volte al secondo (FPS)
+            streamingInterval = setInterval(() => {
+                // Disegna il video sul canvas
+                canvas.width = video.videoWidth / 2; // Riduciamo risoluzione per velocità
+                canvas.height = video.videoHeight / 2;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Converti in stringa Base64 (JPEG)
+                const imageData = canvas.toDataURL('image/jpeg', 0.5); // Qualità 0.5
+                
+                // Invia al server
+                socket.emit('stream_frame', { stream_id: streamId, image: imageData });
+            }, 100); // 100ms = 10 FPS
+        }
+
+        // 3. Ferma Trasmissione
+        function stopStreaming() {
+            clearInterval(streamingInterval);
+            socket.emit('stream_status_change', { stream_id: streamId, status: 'offline' });
+            document.getElementById('btn-start').classList.remove('hidden');
+            document.getElementById('btn-stop').classList.add('hidden');
+            document.getElementById('live-badge').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
