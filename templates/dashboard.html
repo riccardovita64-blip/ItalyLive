@@ -31,6 +31,7 @@
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
+        .star-icon { color: #eab308; } /* Giallo oro */
     </style>
 </head>
 <body>
@@ -51,7 +52,7 @@
                 </a>
                 {% else %}
                 <span class="bg-green-900 text-green-200 px-3 py-1 rounded-full text-xs font-bold border border-green-700">
-                    <i class="fas fa-check-circle"></i> Verified Guide
+                    <i class="fas fa-check-circle"></i> Guide Mode
                 </span>
                 {% endif %}
 
@@ -74,28 +75,55 @@
 
         <header class="mb-10 text-center text-white">
             <h2 class="text-4xl font-bold mb-2 text-shadow">The Digital Grand Tour</h2>
-            <p class="text-gray-300 text-lg">Explore Italian treasures from your couch.</p>
+            <p class="text-gray-300 text-lg">Explore Italian treasures live or watch replays.</p>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {% for stream in streams %}
             <div class="glass-card rounded-2xl overflow-hidden flex flex-col h-full shadow-xl transition hover:shadow-2xl hover:border-gray-400">
+                <!-- Immagine & Badge -->
                 <div class="relative h-56">
                     <img src="{{ stream.image_url }}" class="w-full h-full object-cover opacity-90">
+                    
                     {% if stream.is_live %}
-                    <div class="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-bold px-3 py-1 rounded-full animate-pulse shadow-lg">🔴 LIVE</div>
+                    <div class="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-bold px-3 py-1 rounded-full animate-pulse shadow-lg">
+                        🔴 LIVE NOW
+                    </div>
                     {% else %}
-                    <div class="absolute top-3 left-3 bg-black/70 text-gray-300 text-[10px] font-bold px-3 py-1 rounded-full">OFFLINE</div>
+                    <div class="absolute top-3 left-3 bg-black/70 text-gray-300 text-[10px] font-bold px-3 py-1 rounded-full border border-white/10 flex items-center gap-1">
+                        <i class="fas fa-play-circle"></i> WATCH REPLAY
+                    </div>
                     {% endif %}
                 </div>
 
+                <!-- Contenuto -->
                 <div class="p-6 flex-1 flex flex-col text-white">
+                    
+                    <!-- Info Guida -->
+                    {% if stream.guide %}
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold border border-gray-500">
+                            {{ stream.guide.username[:1] }}
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-xs text-gray-400 font-bold uppercase">Guided by</p>
+                            <p class="text-sm font-bold">{{ stream.guide.username }}</p>
+                        </div>
+                        <div class="text-right">
+                            <div class="flex text-xs star-icon">
+                                <i class="fas fa-star"></i><span class="text-white ml-1">{{ stream.guide.rating }}</span>
+                            </div>
+                            <p class="text-[10px] text-gray-500">({{ stream.guide.reviews_count }} reviews)</p>
+                        </div>
+                    </div>
+                    {% endif %}
+
                     <h3 class="text-xl font-bold mb-2">{{ stream.title }}</h3>
-                    <p class="text-gray-300 text-sm mb-6 flex-1">{{ stream.description }}</p>
+                    <p class="text-gray-400 text-sm mb-6 flex-1 line-clamp-2">{{ stream.description }}</p>
                     
                     <div class="mt-auto pt-4 border-t border-gray-600 flex flex-col gap-2">
                         <a href="/watch/{{ stream.id }}" class="block w-full bg-gray-100 hover:bg-white text-gray-900 text-center py-2 rounded-lg font-bold text-sm transition">
-                            Enter as Viewer
+                            {% if stream.is_live %} Join Live {% else %} Watch Replay {% endif %}
                         </a>
 
                         {% if user.is_streamer %}
