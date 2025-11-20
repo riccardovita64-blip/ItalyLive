@@ -1,8 +1,13 @@
+# --- CRITICAL FIX FOR STRIPE/GEVENT ---
+from gevent import monkey
+monkey.patch_all()
+# --------------------------------------
+
 import os
 import random
 import sys
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -14,10 +19,10 @@ def log(message):
     print(message, file=sys.stdout, flush=True)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'secret_key_default')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_link')
 
-# --- CONFIGURAZIONE ESTERNI ---
+# --- EXTERNAL CONFIG ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY', '').strip()
 DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000').strip('/')
 resend.api_key = os.environ.get('RESEND_API_KEY', '').strip()
@@ -37,7 +42,7 @@ login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- MODELLI ---
+# --- MODELS ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -61,33 +66,33 @@ def load_user(user_id):
 with app.app_context():
     db.create_all()
     if Stream.query.count() == 0:
-        s1 = Stream(title="Galleria degli Uffizi", description="Tour notturno esclusivo tra i capolavori.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043")
-        s2 = Stream(title="Parco Archeologico di Pompei", description="Passeggiata tra le rovine.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674")
-        s3 = Stream(title="Colosseo - Arena", description="Visita nell'anfiteatro.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5")
+        s1 = Stream(title="Uffizi Gallery", description="Exclusive night tour among Renaissance masterpieces.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043")
+        s2 = Stream(title="Pompeii Archaeological Park", description="Walking through the ruins of the eternal city at sunset.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674")
+        s3 = Stream(title="Colosseum Arena", description="First-person visit inside the world's most famous amphitheater.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5")
         db.session.add_all([s1, s2, s3])
         db.session.commit()
 
-# --- MAIL ---
+# --- EMAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
-    log(f"\n🔗 LINK ATTIVAZIONE: {confirm_url}\n")
+    log(f"\n🔗 ACTIVATION LINK: {confirm_url}\n")
     if os.environ.get('RESEND_API_KEY'):
         try:
             resend.Emails.send({
                 "from": "onboarding@resend.dev",
                 "to": [user_email],
-                "subject": "Attiva Account ItalyFromCouch",
-                "html": f'<a href="{confirm_url}">Conferma Email</a>'
+                "subject": "Activate ItalyFromCouch Account",
+                "html": f'<a href="{confirm_url}">Confirm Email</a>'
             })
-        except Exception as e: log(f"Errore Resend: {e}")
+        except Exception as e: log(f"Resend Error: {e}")
 
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# --- ROTTE ---
+# --- ROUTES ---
 @app.route('/')
 @login_required
 def index():
@@ -104,7 +109,7 @@ def watch(stream_id):
 @login_required
 def broadcast(stream_id):
     if not current_user.is_streamer:
-        flash("Devi attivare la modalità Guida per trasmettere.", "error")
+        flash("You must enable Guide Mode to broadcast.", "error")
         return redirect(url_for('index'))
     stream = Stream.query.get_or_404(stream_id)
     return render_template('broadcast.html', user=current_user, stream=stream)
@@ -114,20 +119,19 @@ def broadcast(stream_id):
 def become_guide():
     current_user.is_streamer = True
     db.session.commit()
-    flash("Modalità Guida attivata! Ora puoi trasmettere.", "success")
+    flash("Guide Mode Activated! You can now broadcast.", "success")
     return redirect(url_for('index'))
 
 # --- SOCKETS ---
 @socketio.on('join_stream')
 def on_join(data):
-    room = str(data['stream_id']) # Converti in stringa per sicurezza
+    room = str(data['stream_id'])
     join_room(room)
 
 @socketio.on('stream_frame')
 def on_stream_frame(data):
     room = str(data['stream_id'])
     image_data = data['image']
-    # Invia a tutti nella stanza tranne a chi ha mandato il frame
     emit('video_update', {'image': image_data}, room=room, include_self=False)
 
 @socketio.on('stream_status_change')
@@ -150,7 +154,7 @@ def handle_tip(data):
     room = str(data.get('stream_id'))
     emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, room=room)
 
-# --- LOGIN/LOGOUT ---
+# --- AUTH ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
@@ -160,26 +164,26 @@ def login():
             username = request.form.get('username')
             email = request.form.get('email')
             password = request.form.get('password')
-            if User.query.filter_by(email=email).first(): flash('Email usata', 'error'); return redirect(url_for('login'))
+            if User.query.filter_by(email=email).first(): flash('Email already in use', 'error'); return redirect(url_for('login'))
             new_user = User(username=username, email=email, password=generate_password_hash(password, method='pbkdf2:sha256'))
             db.session.add(new_user); db.session.commit()
             send_confirmation_email(email)
-            flash('Registrato! Controlla la mail.', 'info'); return redirect(url_for('login'))
+            flash('Registered! Check your email.', 'info'); return redirect(url_for('login'))
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
-                if not user.confirmed: flash('Conferma la mail!', 'warning')
+                if not user.confirmed: flash('Please confirm your email!', 'warning')
                 else: login_user(user); return redirect(url_for('index'))
-            else: flash('Dati errati', 'error')
+            else: flash('Invalid credentials', 'error')
     return render_template('login.html')
 
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try: email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
-    except: flash('Link scaduto.', 'error'); return redirect(url_for('login'))
+    except: flash('Invalid or expired link.', 'error'); return redirect(url_for('login'))
     user = User.query.filter_by(email=email).first_or_404()
     user.confirmed = True; db.session.commit()
-    flash('Email confermata!', 'success'); return redirect(url_for('login'))
+    flash('Email confirmed! Please log in.', 'success'); return redirect(url_for('login'))
 
 @app.route('/logout')
 @login_required
@@ -194,14 +198,14 @@ def create_checkout_session():
         amount_eur = data.get('amount', 5)
         stream_id = data.get('stream_id', 1)
         
-        if not stripe.api_key: return jsonify({'error': 'Stripe non configurato'}), 500
+        if not stripe.api_key: return jsonify({'error': 'Stripe not configured'}), 500
         
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
                 'price_data': {
                     'currency': 'eur',
-                    'product_data': {'name': 'Donazione Museo'},
+                    'product_data': {'name': 'Museum Tip'},
                     'unit_amount': int(float(amount_eur) * 100),
                 },
                 'quantity': 1,
@@ -221,11 +225,11 @@ def payment_success():
     if session_id:
         try:
             session = stripe.checkout.Session.retrieve(session_id)
-            donor = session.metadata.get('username', 'Anonimo')
+            donor = session.metadata.get('username', 'Anonymous')
             amount = session.metadata.get('amount', '0')
             stream_id = session.metadata.get('stream_id', '1')
             socketio.emit('new_tip', {'username': donor, 'amount': amount}, room=stream_id)
-            flash(f"Grazie {donor}!", "success")
+            flash(f"Thanks {donor}!", "success")
             return redirect(url_for('watch', stream_id=stream_id))
         except: pass
     return redirect(url_for('index'))
