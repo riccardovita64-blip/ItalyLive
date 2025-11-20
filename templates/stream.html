@@ -22,7 +22,7 @@
 </head>
 <body class="text-white h-screen flex flex-col overflow-hidden">
 
-    <!-- Flash Messages per Conferma Pagamento -->
+    <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             <div class="absolute top-16 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4">
@@ -44,9 +44,8 @@
         </a>
         <div class="font-bold text-gray-200 tracking-wide text-lg">{{ stream.title }}</div>
         <div class="w-24 text-right">
-            {% if is_live %}
-                <span class="bg-red-600 text-white text-xs px-2 py-1 rounded animate-pulse">LIVE</span>
-            {% endif %}
+            <!-- Indicatore Live (gestito via JS ma presente come placeholder) -->
+            <span id="live-indicator" class="bg-red-600 text-white text-xs px-2 py-1 rounded animate-pulse hidden">LIVE</span>
         </div>
     </nav>
 
@@ -54,21 +53,17 @@
         <!-- Video Area -->
         <main class="flex-1 flex flex-col bg-black relative">
             <div id="video-container" class="relative w-full h-full flex items-center justify-center bg-gray-900">
-                {% if is_live %}
-                    <img src="{{ url_for('video_feed') }}" alt="Live Stream">
-                {% else %}
-                    <div class="text-center p-10">
-                        <i class="fas fa-moon text-6xl text-gray-700 mb-4"></i>
-                        <p class="text-gray-400 text-xl">Il museo è chiuso al momento.</p>
-                        <p class="text-gray-600 text-sm mt-2">La diretta è terminata o non è ancora iniziata.</p>
-                        
-                        <form action="/toggle_stream" method="POST" class="mt-6">
-                            <button type="submit" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-4 py-2 rounded text-sm transition border border-gray-700">
-                                (Admin) Avvia Test Cam
-                            </button>
-                        </form>
-                    </div>
-                {% endif %}
+                
+                <!-- Immagine stream via Socket -->
+                <img id="live-feed" src="" class="w-full h-full object-contain hidden" alt="Live Stream">
+                
+                <!-- Placeholder Offline -->
+                <div id="offline-msg" class="text-center">
+                    <i class="fas fa-video-slash text-6xl text-gray-700 mb-4"></i>
+                    <p class="text-gray-400 text-xl">In attesa del collegamento...</p>
+                    <p class="text-gray-600 text-sm mt-2">La diretta inizierà a breve.</p>
+                </div>
+
                 <div id="tip-overlay" class="absolute top-10 right-10 w-80 z-50 pointer-events-none"></div>
             </div>
         </main>
@@ -80,8 +75,8 @@
             
             <div class="p-3 bg-gray-800">
                 <form id="chat-form" class="flex gap-2">
-                    <input type="text" id="message-input" placeholder="Commenta..." class="w-full bg-gray-900 text-white rounded px-3 py-2 focus:outline-none border border-gray-700 focus:border-gray-500 transition text-sm">
-                    <button type="submit" class="text-gray-400 hover:text-white px-2"><i class="fas fa-paper-plane"></i></button>
+                    <input type="text" id="message-input" placeholder="Commenta..." class="w-full bg-gray-900 text-white rounded px-3 py-2 focus:outline-none border border-gray-700 focus:border-yellow-500 transition text-sm">
+                    <button type="submit" class="text-yellow-500 hover:text-yellow-400 px-2"><i class="fas fa-paper-plane"></i></button>
                 </form>
             </div>
 
@@ -100,8 +95,34 @@
         const socket = io();
         const chatBox = document.getElementById('chat-box');
         
-        // ID dello stream corrente (passato da Flask)
-        const streamId = {{ stream.id }};
+        // FIX SINTASSI: Usiamo le virgolette per evitare errori se Flask non renderizza
+        // In questo modo, se apri il file per sbaglio senza server, streamId sarà la stringa "{{ stream.id }}" invece di rompere il JS
+        const streamId = "{{ stream.id }}";
+        
+        // Entra nella stanza del museo
+        socket.emit('join_stream', { stream_id: streamId });
+
+        // Ricevi Video
+        const img = document.getElementById('live-feed');
+        const offlineMsg = document.getElementById('offline-msg');
+        const liveIndicator = document.getElementById('live-indicator');
+
+        socket.on('video_update', (data) => {
+            img.src = data.image;
+            img.classList.remove('hidden');
+            offlineMsg.classList.add('hidden');
+            liveIndicator.classList.remove('hidden');
+        });
+
+        socket.on('status_update', (data) => {
+            if(!data.is_live) {
+                img.classList.add('hidden');
+                offlineMsg.classList.remove('hidden');
+                liveIndicator.classList.add('hidden');
+            } else {
+                liveIndicator.classList.remove('hidden');
+            }
+        });
 
         // --- FUNZIONE DI PAGAMENTO STRIPE ---
         async function startPayment(amount) {
@@ -114,7 +135,6 @@
                 
                 const data = await response.json();
                 if (data.url) {
-                    // Reindirizza l'utente alla pagina di pagamento Stripe
                     window.location.href = data.url;
                 } else {
                     alert("Errore creazione pagamento: " + (data.error || 'Sconosciuto'));
@@ -145,7 +165,7 @@
             e.preventDefault();
             const input = document.getElementById('message-input');
             if(input.value.trim()) {
-                socket.emit('send_message', { message: input.value });
+                socket.emit('send_message', { message: input.value, stream_id: streamId });
                 input.value = '';
             }
         });
