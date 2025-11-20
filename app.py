@@ -177,15 +177,17 @@ def create_checkout_session():
         log(f"✅ Sessione Stripe creata: {checkout_session.id}")
         return jsonify({'url': checkout_session.url})
         
-    except stripe.error.AuthenticationError as e:
-        log(f"❌ Stripe Auth Error: {e}")
-        return jsonify({'error': 'Chiave API Stripe non valida'}), 500
-    except stripe.error.APIConnectionError as e:
-        log(f"❌ Stripe Connection Error: {e}")
-        return jsonify({'error': 'Errore di connessione a Stripe'}), 500
     except Exception as e:
-        log(f"❌ Stripe Error generico: {type(e).__name__}: {e}")
-        return jsonify({'error': str(e)}), 500
+        error_msg = str(e)
+        log(f"❌ Stripe Error: {type(e).__name__}: {error_msg}")
+        
+        # Analizza il tipo di errore per dare feedback migliore
+        if 'authentication' in error_msg.lower() or 'api key' in error_msg.lower():
+            return jsonify({'error': 'Chiave API Stripe non valida'}), 500
+        elif 'connection' in error_msg.lower() or 'network' in error_msg.lower():
+            return jsonify({'error': 'Errore di connessione a Stripe'}), 500
+        else:
+            return jsonify({'error': f'Errore pagamento: {error_msg}'}), 500
 
 @app.route('/payment/success')
 @login_required
