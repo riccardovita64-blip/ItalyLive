@@ -50,6 +50,8 @@ class User(UserMixin, db.Model):
     password = db.Column(db.String(150), nullable=False)
     confirmed = db.Column(db.Boolean, default=False)
     is_streamer = db.Column(db.Boolean, default=False)
+    rating = db.Column(db.Float, default=5.0) # Stelle della guida (max 5.0)
+    reviews_count = db.Column(db.Integer, default=0)
 
 class Stream(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -57,35 +59,62 @@ class Stream(db.Model):
     description = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(300))
     is_live = db.Column(db.Boolean, default=False)
+    # Colleghiamo lo stream a una guida specifica
+    guide_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    guide = db.relationship('User', backref='streams')
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- INIT DB ---
-with app.app_context():
+# --- INIT DB (Popoliamo con Guide Reali) ---
+def init_db():
     db.create_all()
     if Stream.query.count() == 0:
-        s1 = Stream(title="Uffizi Gallery", description="Exclusive night tour among Renaissance masterpieces.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043")
-        s2 = Stream(title="Pompeii Archaeological Park", description="Walking through the ruins of the eternal city at sunset.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674")
-        s3 = Stream(title="Colosseum Arena", description="First-person visit inside the world's most famous amphitheater.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5")
+        # 1. Creiamo le Guide
+        guide1 = User(username="Giulia_Archeo", email="giulia@test.com", password=generate_password_hash("pass", method='pbkdf2:sha256'), confirmed=True, is_streamer=True, rating=4.9, reviews_count=120)
+        guide2 = User(username="Marco_Roma", email="marco@test.com", password=generate_password_hash("pass", method='pbkdf2:sha256'), confirmed=True, is_streamer=True, rating=4.7, reviews_count=85)
+        guide3 = User(username="Sofia_Art", email="sofia@test.com", password=generate_password_hash("pass", method='pbkdf2:sha256'), confirmed=True, is_streamer=True, rating=5.0, reviews_count=42)
+        
+        db.session.add_all([guide1, guide2, guide3])
+        db.session.commit()
+
+        # 2. Creiamo gli Stream assegnati alle guide
+        s1 = Stream(title="Uffizi Gallery Night Tour", description="Exclusive night tour among Renaissance masterpieces.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043", is_live=True, guide_id=guide3.id)
+        s2 = Stream(title="Pompeii Ruins at Sunset", description="Walking through the eternal city ruins.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674", is_live=False, guide_id=guide1.id)
+        s3 = Stream(title="Colosseum Underground", description="Deep dive into the gladiator pits.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5", is_live=False, guide_id=guide2.id)
+        
         db.session.add_all([s1, s2, s3])
         db.session.commit()
+        log("✅ Database initialized with Guides and Streams.")
 
 # --- EMAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
-    log(f"\n🔗 ACTIVATION LINK: {confirm_url}\n")
+    
+    log(f"\n🔗 ACTIVATION LINK (Backup): {confirm_url}\n")
+    
     if os.environ.get('RESEND_API_KEY'):
         try:
             resend.Emails.send({
                 "from": "onboarding@resend.dev",
                 "to": [user_email],
-                "subject": "Activate ItalyFromCouch Account",
-                "html": f'<a href="{confirm_url}">Confirm Email</a>'
+                "subject": "Welcome to ItalyFromCouch",
+                "html": f'''
+                <div style="font-family: sans-serif; text-align: center;">
+                    <h2>Welcome to ItalyFromCouch! 🇮🇹</h2>
+                    <p>Click below to activate your account:</p>
+                    <a href="{confirm_url}" style="background:#d97706; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;">Confirm Email</a>
+                </div>
+                '''
             })
-        except Exception as e: log(f"Resend Error: {e}")
+            log(f"✅ Email sent to {user_email} via Resend.")
+        except Exception as e: 
+            log(f"❌ Resend Error: {e}")
+            # Nota per l'utente: Resend Free invia solo alla tua mail registrata
+            if "403" in str(e):
+                log("⚠️ RESEND LIMIT: On Free Tier you can only send emails to YOURSELF.")
 
 @app.after_request
 def add_header(response):
@@ -112,12 +141,21 @@ def broadcast(stream_id):
         flash("You must enable Guide Mode to broadcast.", "error")
         return redirect(url_for('index'))
     stream = Stream.query.get_or_404(stream_id)
+    
+    # Assegna questo stream alla guida corrente se non lo è già
+    stream.guide_id = current_user.id
+    db.session.commit()
+    
     return render_template('broadcast.html', user=current_user, stream=stream)
 
 @app.route('/become_guide')
 @login_required
 def become_guide():
     current_user.is_streamer = True
+    # Diamo un rating di default alla nuova guida
+    if current_user.rating is None:
+        current_user.rating = 5.0
+        current_user.reviews_count = 0
     db.session.commit()
     flash("Guide Mode Activated! You can now broadcast.", "success")
     return redirect(url_for('index'))
@@ -167,8 +205,15 @@ def login():
             if User.query.filter_by(email=email).first(): flash('Email already in use', 'error'); return redirect(url_for('login'))
             new_user = User(username=username, email=email, password=generate_password_hash(password, method='pbkdf2:sha256'))
             db.session.add(new_user); db.session.commit()
-            send_confirmation_email(email)
-            flash('Registered! Check your email.', 'info'); return redirect(url_for('login'))
+            
+            # Tentativo invio mail resiliente
+            try:
+                send_confirmation_email(email)
+                flash('Registered! Check your email.', 'info')
+            except:
+                flash('Registered! Email failed (Check logs).', 'warning')
+                
+            return redirect(url_for('login'))
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
@@ -180,10 +225,10 @@ def login():
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try: email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
-    except: flash('Invalid or expired link.', 'error'); return redirect(url_for('login'))
+    except: flash('Invalid link.', 'error'); return redirect(url_for('login'))
     user = User.query.filter_by(email=email).first_or_404()
     user.confirmed = True; db.session.commit()
-    flash('Email confirmed! Please log in.', 'success'); return redirect(url_for('login'))
+    flash('Email confirmed! Login now.', 'success'); return redirect(url_for('login'))
 
 @app.route('/logout')
 @login_required
@@ -233,6 +278,13 @@ def payment_success():
             return redirect(url_for('watch', stream_id=stream_id))
         except: pass
     return redirect(url_for('index'))
+
+# Init Context
+with app.app_context():
+    try:
+        init_db()
+        log("✅ App initialized.")
+    except Exception as e: log(f"❌ Init Error: {e}")
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
