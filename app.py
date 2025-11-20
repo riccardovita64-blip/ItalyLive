@@ -1,8 +1,11 @@
+# --- FIX CRITICO GEVENT: DEVE ESSERE LA PRIMA COSA ---
+from gevent import monkey
+monkey.patch_all()
+# -----------------------------------------------------
+
 import os
 import random
 import sys
-# RIMOSSO IMPORT SOCKET E IL FIX IPV4 CHE CAUSAVA ERRORE DI RICORSIONE
-
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -23,12 +26,10 @@ app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 
 # --- CONFIGURAZIONE STRIPE ---
 stripe_key = os.environ.get('STRIPE_SECRET_KEY')
 if stripe_key:
-    # .strip() è fondamentale per evitare errori se copi spazi per sbaglio
     stripe.api_key = stripe_key.strip()
 else:
     log("⚠️ ATTENZIONE: STRIPE_SECRET_KEY mancante!")
 
-# Pulisce lo slash finale se presente nell'URL
 DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000').strip('/')
 
 # --- DB ---
@@ -41,16 +42,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # --- RESEND ---
 resend_key = os.environ.get('RESEND_API_KEY')
-if resend_key: resend.api_key = resend_key.strip()
+if resend_key:
+    resend.api_key = resend_key.strip()
 
 db = SQLAlchemy(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# async_mode='gevent' forza SocketIO a usare la modalità compatibile
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
+# --- MODELLI ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -103,7 +107,7 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- MAIL ---
+# --- MAIL (RESEND) ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
@@ -135,7 +139,11 @@ def create_checkout_session():
         amount_eur = data.get('amount', 5)
         stream_id = data.get('stream_id', 1)
         
-        log(f"💳 Creazione pagamento Stripe: {amount_eur}EUR per Stream {stream_id}")
+        if not stripe.api_key:
+            log("❌ Errore: API Key Stripe mancante")
+            return jsonify({'error': 'Server payment config error'}), 500
+        
+        log(f"💳 Creazione pagamento: {amount_eur}EUR")
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -161,7 +169,7 @@ def create_checkout_session():
         )
         return jsonify({'url': checkout_session.url})
     except Exception as e:
-        log(f"❌ STRIPE ERROR DETAIL: {e}")
+        log(f"❌ STRIPE ERROR: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/payment/success')
@@ -179,10 +187,8 @@ def payment_success():
             flash(f"Grazie {donor}! Donazione di {amount}€ ricevuta.", "success")
             return redirect(url_for('watch', stream_id=stream_id))
         except Exception as e:
-            log(f"❌ Errore verifica pagamento: {e}")
-            flash("Errore nella verifica del pagamento.", "error")
+            log(f"❌ Errore verifica: {e}")
             return redirect(url_for('index'))
-            
     return redirect(url_for('index'))
 
 @app.route('/payment/cancel')
@@ -255,7 +261,7 @@ def login():
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
-                if not user.confirmed: flash('Account non attivo!', 'warning')
+                if not user.confirmed: flash('Account non attivo! Conferma la mail.', 'warning')
                 else: login_user(user); return redirect(url_for('index'))
             else: flash('Dati errati', 'error')
     return render_template('login.html')
@@ -269,7 +275,7 @@ def confirm_email(token):
         user.confirmed = True
         db.session.add(user)
         db.session.commit()
-        flash('Email confermata!', 'success')
+        flash('Email confermata! Accedi.', 'success')
     return redirect(url_for('login'))
 
 @app.route('/logout')
