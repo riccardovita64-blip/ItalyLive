@@ -1,7 +1,7 @@
 import os
 import random
 import sys
-# Nota: Nessun import di socket o fix ipv4 qui, causano crash con Gunicorn!
+# RIMOSSO IMPORT SOCKET E IL FIX IPV4 CHE CAUSAVA ERRORE DI RICORSIONE
 
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
 from flask_socketio import SocketIO, emit
@@ -13,7 +13,6 @@ import cv2
 import resend
 import stripe
 
-# Funzione helper per i log di Render
 def log(message):
     print(message, file=sys.stdout, flush=True)
 
@@ -21,17 +20,18 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_sicurezza_link')
 
-# --- STRIPE ---
+# --- CONFIGURAZIONE STRIPE ---
 stripe_key = os.environ.get('STRIPE_SECRET_KEY')
 if stripe_key:
-    stripe.api_key = stripe_key.strip() # Rimuove spazi pericolosi
+    # .strip() è fondamentale per evitare errori se copi spazi per sbaglio
+    stripe.api_key = stripe_key.strip()
 else:
-    log("⚠️ ATTENZIONE: STRIPE_SECRET_KEY mancante su Render!")
+    log("⚠️ ATTENZIONE: STRIPE_SECRET_KEY mancante!")
 
-# Pulisce l'URL del dominio (toglie slash finale se c'è)
+# Pulisce lo slash finale se presente nell'URL
 DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000').strip('/')
 
-# --- DATABASE ---
+# --- DB ---
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -41,8 +41,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # --- RESEND ---
 resend_key = os.environ.get('RESEND_API_KEY')
-if resend_key:
-    resend.api_key = resend_key.strip()
+if resend_key: resend.api_key = resend_key.strip()
 
 db = SQLAlchemy(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -52,7 +51,6 @@ login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- MODELLI ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -105,41 +103,30 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- MAIL (RESEND) ---
+# --- MAIL ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
-    
-    log(f"\n🔗 LINK ATTIVAZIONE (Backup Logs): {confirm_url}\n")
-
+    log(f"\n🔗 LINK ATTIVAZIONE: {confirm_url}\n")
     if os.environ.get('RESEND_API_KEY'):
         try:
             params = {
                 "from": "onboarding@resend.dev",
                 "to": [user_email],
                 "subject": "Benvenuto in ItalyFromCouch",
-                "html": f'''
-                <div style="font-family: sans-serif; padding: 20px; text-align: center;">
-                    <h2 style="color: #d97706;">ItalyFromCouch</h2>
-                    <p>Grazie per esserti registrato!</p>
-                    <a href="{confirm_url}" style="background-color: #d97706; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">CONFERMA EMAIL</a>
-                    <p style="font-size: 12px; color: #666;">Se il bottone non funziona: {confirm_url}</p>
-                </div>
-                '''
+                "html": f'<p>Clicca per iniziare il tour: <a href="{confirm_url}">Conferma Email</a></p>'
             }
-            r = resend.Emails.send(params)
-            log(f"✅ Mail inviata via Resend. ID: {r.get('id')}")
+            resend.Emails.send(params)
+            log("✅ Mail inviata via Resend.")
         except Exception as e:
-            log(f"❌ Errore invio Resend: {e}")
-    else:
-        log("⚠️ RESEND_API_KEY mancante.")
+            log(f"❌ Errore Resend: {e}")
 
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# --- ROTTE PAGAMENTI (STRIPE) ---
+# --- ROTTE STRIPE ---
 @app.route('/create-checkout-session', methods=['POST'])
 @login_required
 def create_checkout_session():
@@ -148,9 +135,7 @@ def create_checkout_session():
         amount_eur = data.get('amount', 5)
         stream_id = data.get('stream_id', 1)
         
-        # Verifica chiave Stripe
-        if not stripe.api_key:
-            return jsonify({'error': 'Server payment config error'}), 500
+        log(f"💳 Creazione pagamento Stripe: {amount_eur}EUR per Stream {stream_id}")
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -158,9 +143,8 @@ def create_checkout_session():
                 'price_data': {
                     'currency': 'eur',
                     'product_data': {
-                        'name': 'Supporto Museo',
-                        'description': f'Donazione da {current_user.username}',
-                        'images': ['https://images.unsplash.com/photo-1552832230-c0197dd311b5'],
+                        'name': 'Donazione Museo',
+                        'description': f'Supporto da {current_user.username}',
                     },
                     'unit_amount': int(float(amount_eur) * 100),
                 },
@@ -177,7 +161,7 @@ def create_checkout_session():
         )
         return jsonify({'url': checkout_session.url})
     except Exception as e:
-        log(f"❌ Stripe Error: {e}")
+        log(f"❌ STRIPE ERROR DETAIL: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/payment/success')
@@ -196,7 +180,9 @@ def payment_success():
             return redirect(url_for('watch', stream_id=stream_id))
         except Exception as e:
             log(f"❌ Errore verifica pagamento: {e}")
+            flash("Errore nella verifica del pagamento.", "error")
             return redirect(url_for('index'))
+            
     return redirect(url_for('index'))
 
 @app.route('/payment/cancel')
@@ -269,7 +255,7 @@ def login():
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
-                if not user.confirmed: flash('Account non attivo! Conferma la mail.', 'warning')
+                if not user.confirmed: flash('Account non attivo!', 'warning')
                 else: login_user(user); return redirect(url_for('index'))
             else: flash('Dati errati', 'error')
     return render_template('login.html')
@@ -283,7 +269,7 @@ def confirm_email(token):
         user.confirmed = True
         db.session.add(user)
         db.session.commit()
-        flash('Email confermata! Accedi.', 'success')
+        flash('Email confermata!', 'success')
     return redirect(url_for('login'))
 
 @app.route('/logout')
