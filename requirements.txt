@@ -8,3 +8,4 @@ gevent
 gevent-websocket
 gunicorn
 psycopg2-binary
+sendgrid
