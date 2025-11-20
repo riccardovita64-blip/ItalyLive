@@ -1,18 +1,6 @@
 import os
 import random
 import sys
-import socket
-
-# --- FIX RETE: FORZA IPV4 (Per evitare errore 101 su Render) ---
-def getaddrinfo(*args, **kwargs):
-    res = socket._original_getaddrinfo(*args, **kwargs)
-    return [r for r in res if r[0] == socket.AF_INET]
-
-if not hasattr(socket, '_original_getaddrinfo'):
-    socket._original_getaddrinfo = socket.getaddrinfo
-    socket.getaddrinfo = getaddrinfo
-# -----------------------------------------------------------
-
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -20,8 +8,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, SignatureExpired
 import cv2
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail as SGMail
+import resend
 
 def log(message):
     print(message, file=sys.stdout, flush=True)
@@ -30,17 +17,15 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_sicurezza_link')
 
-# --- DATABASE ---
+# --- DB ---
 database_url = os.environ.get('DATABASE_URL')
 if database_url and database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
-
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url or 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# --- SENDGRID CONFIG ---
-app.config['SENDGRID_API_KEY'] = os.environ.get('SENDGRID_API_KEY')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@tuodominio.com')
+# --- RESEND ---
+resend.api_key = os.environ.get('RESEND_API_KEY')
 
 db = SQLAlchemy(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -50,7 +35,7 @@ login_manager.login_view = 'login'
 
 serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
-# --- MODELLO UTENTE ---
+# --- MODELLI ---
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
@@ -58,17 +43,36 @@ class User(UserMixin, db.Model):
     password = db.Column(db.String(150), nullable=False)
     color = db.Column(db.String(20), default='#ffffff')
     confirmed = db.Column(db.Boolean, default=False)
-    is_streamer = db.Column(db.Boolean, default=False)
+    is_streamer = db.Column(db.Boolean, default=False) # Chi può trasmettere?
+
+# NUOVO MODELLO: I Musei/Eventi
+class Stream(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    image_url = db.Column(db.String(300)) # Immagine di copertina
+    is_live = db.Column(db.Boolean, default=False) # Se è in diretta ora
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- FIX TABELLE DB ---
+# --- INIZIALIZZAZIONE DATI (Crea Musei Finti) ---
+def init_db():
+    db.create_all()
+    # Se non ci sono stream, ne creiamo 3 di esempio
+    if Stream.query.count() == 0:
+        s1 = Stream(title="Galleria degli Uffizi", description="Tour notturno esclusivo tra i capolavori del Rinascimento.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043", is_live=True)
+        s2 = Stream(title="Parco Archeologico di Pompei", description="Passeggiata tra le rovine della città eterna al tramonto.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674", is_live=False)
+        s3 = Stream(title="Museo Egizio Torino", description="Scoperta dei sarcofagi e dei misteri dei faraoni.", image_url="https://images.unsplash.com/photo-1566221536239-4f5686115f72", is_live=False)
+        db.session.add_all([s1, s2, s3])
+        db.session.commit()
+        log("🏛️ Musei di esempio creati nel DB.")
+
 with app.app_context():
     try:
-        db.create_all()
-        log("✅ Database inizializzato.")
+        init_db()
+        log("✅ Database pronto.")
     except Exception as e:
         log(f"❌ Errore Database: {e}")
 
@@ -87,59 +91,22 @@ def generate_frames():
             frame = buffer.tobytes()
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# --- INVIO MAIL CON SENDGRID ---
 def send_confirmation_email(user_email):
     token = serializer.dumps(user_email, salt=app.config['SECURITY_PASSWORD_SALT'])
     confirm_url = url_for('confirm_email', token=token, _external=True)
-    
-    log(f"\n🔗 LINK ATTIVAZIONE (Backup): {confirm_url}\n")
-
-    if not app.config['SENDGRID_API_KEY']:
-        log("⚠️ SendGrid non configurato. Usa il link nei log.")
-        return
-
-    try:
-        message = SGMail(
-            from_email=app.config['MAIL_DEFAULT_SENDER'],
-            to_emails=user_email,
-            subject='Conferma Account PyStream',
-            html_content=f'''
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                    <h1 style="color: white; margin: 0;">PyStream</h1>
-                </div>
-                <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 10px 10px;">
-                    <h2 style="color: #1f2937;">Benvenuto su PyStream! 🎉</h2>
-                    <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
-                        Grazie per esserti registrato. Clicca sul pulsante qui sotto per confermare il tuo indirizzo email e iniziare a usare la piattaforma.
-                    </p>
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{confirm_url}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 40px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold; font-size: 16px;">
-                            Conferma Email
-                        </a>
-                    </div>
-                    <p style="color: #6b7280; font-size: 14px;">
-                        Se non hai creato un account, ignora questa email.
-                    </p>
-                    <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-                    <p style="color: #9ca3af; font-size: 12px; text-align: center;">
-                        Questo link scade tra 1 ora.
-                    </p>
-                </div>
-            </div>
-            '''
-        )
-        
-        sg = SendGridAPIClient(app.config['SENDGRID_API_KEY'])
-        response = sg.send(message)
-        
-        if response.status_code == 202:
-            log(f"✅ EMAIL INVIATA CON SUCCESSO a {user_email}")
-        else:
-            log(f"⚠️ SendGrid status code: {response.status_code}")
-            
-    except Exception as e:
-        log(f"❌ ERRORE INVIO EMAIL: {e}")
+    log(f"\n🔗 LINK ATTIVAZIONE: {confirm_url}\n")
+    if os.environ.get('RESEND_API_KEY'):
+        try:
+            params = {
+                "from": "onboarding@resend.dev",
+                "to": [user_email],
+                "subject": "Benvenuto in MuseumLive",
+                "html": f'<p>Clicca per entrare nel museo: <a href="{confirm_url}">Conferma Email</a></p>'
+            }
+            resend.Emails.send(params)
+            log("✅ Mail inviata via Resend.")
+        except Exception as e:
+            log(f"❌ Errore Resend: {e}")
 
 @app.after_request
 def add_header(response):
@@ -147,10 +114,22 @@ def add_header(response):
     return response
 
 # --- ROTTE ---
+
+# 1. Dashboard (Home): Mostra la lista dei musei
 @app.route('/')
 @login_required
 def index():
-    return render_template('index.html', username=current_user.username, is_live=streaming_active)
+    streams = Stream.query.all()
+    return render_template('dashboard.html', username=current_user.username, streams=streams)
+
+# 2. Pagina Stream (Singolo Museo): Dove vedi il video
+@app.route('/watch/<int:stream_id>')
+@login_required
+def watch(stream_id):
+    stream = Stream.query.get_or_404(stream_id)
+    # Nota: Per ora tutti i musei mostrano lo stesso video (la tua webcam/stream)
+    # In futuro potrai avere fonti diverse.
+    return render_template('stream.html', username=current_user.username, stream=stream, is_live=streaming_active)
 
 @app.route('/video_feed')
 def video_feed():
@@ -162,12 +141,13 @@ def video_feed():
 @login_required
 def toggle_stream():
     global streaming_active, camera
+    # Solo per demo: accende la webcam locale
     if not streaming_active:
         try:
             camera = cv2.VideoCapture(0)
             if not camera.isOpened():
-                flash("Nessuna webcam trovata.", "error")
-                return redirect(url_for('index'))
+                flash("Nessuna camera trovata.", "error")
+                return redirect(request.referrer)
             streaming_active = True
             socketio.emit('stream_status', {'status': 'live'})
         except: flash("Errore webcam", "error")
@@ -175,65 +155,57 @@ def toggle_stream():
         streaming_active = False
         if camera: camera.release(); camera = None
         socketio.emit('stream_status', {'status': 'offline'})
-    return redirect(url_for('index'))
+    return redirect(request.referrer)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated: return redirect(url_for('index'))
-    
     if request.method == 'POST':
         action = request.form.get('action')
-        
         if action == 'register':
             username = request.form.get('username')
             email = request.form.get('email')
             password = request.form.get('password')
-
+            
             if User.query.filter_by(email=email).first():
                 flash('Email già usata', 'error'); return redirect(url_for('login'))
             if User.query.filter_by(username=username).first():
                 flash('Username già preso', 'error'); return redirect(url_for('login'))
 
             try:
-                new_user = User(username=username, email=email, password=generate_password_hash(password, method='pbkdf2:sha256'), color=random.choice(['#ef4444', '#3b82f6', '#10b981']), confirmed=False)
+                new_user = User(username=username, email=email, password=generate_password_hash(password, method='pbkdf2:sha256'), confirmed=False)
                 db.session.add(new_user)
                 db.session.commit()
                 send_confirmation_email(email)
                 flash('Registrazione ok! Controlla la mail.', 'info')
                 return redirect(url_for('login'))
-            except Exception as e:
-                db.session.rollback()
-                log(f"❌ Errore critico DB: {e}")
-                flash('Errore server.', 'error')
+            except: db.session.rollback(); flash('Errore server.', 'error')
 
         elif action == 'login':
             user = User.query.filter_by(username=request.form.get('username')).first()
             if user and check_password_hash(user.password, request.form.get('password')):
-                if not user.confirmed: flash('Account non attivo! Conferma la mail.', 'warning')
+                if not user.confirmed: flash('Account non attivo!', 'warning')
                 else: login_user(user); return redirect(url_for('index'))
             else: flash('Dati errati', 'error')
-
     return render_template('login.html')
 
 @app.route('/confirm/<token>')
 def confirm_email(token):
     try: email = serializer.loads(token, salt=app.config['SECURITY_PASSWORD_SALT'], max_age=3600)
     except: flash('Link scaduto.', 'error'); return redirect(url_for('login'))
-    
     user = User.query.filter_by(email=email).first_or_404()
     if not user.confirmed:
         user.confirmed = True
         db.session.add(user)
         db.session.commit()
-        flash('Email confermata! Accedi.', 'success')
+        flash('Email confermata!', 'success')
     return redirect(url_for('login'))
 
 @app.route('/logout')
 @login_required
-def logout():
-    logout_user()
-    return redirect(url_for('login'))
+def logout(): logout_user(); return redirect(url_for('login'))
 
+# Sockets (Chat e Tip)
 @socketio.on('send_message')
 def handle_message(data):
     if current_user.is_authenticated: emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
