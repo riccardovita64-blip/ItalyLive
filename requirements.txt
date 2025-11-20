@@ -9,3 +9,4 @@ gevent-websocket
 gunicorn
 psycopg2-binary
 resend
+stripe
