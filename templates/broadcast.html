@@ -1,78 +1,109 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Studio Live Mobile</title>
+    <title>Mobile Studio</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body { background-color: #000; color: white; overflow: hidden; }
         #localVideo { width: 100%; height: 100%; object-fit: cover; }
         .control-panel {
             position: absolute; bottom: 30px; left: 0; width: 100%;
-            display: flex; justify-content: center; gap: 20px; z-index: 20;
+            display: flex; justify-content: center; gap: 20px; z-index: 30;
         }
         .status-badge {
-            position: absolute; top: 20px; left: 20px; z-index: 20;
+            position: absolute; top: 20px; left: 20px; z-index: 30;
             background: rgba(255, 0, 0, 0.8); padding: 5px 15px;
             border-radius: 20px; font-weight: bold; font-size: 14px;
             box-shadow: 0 0 15px rgba(255,0,0,0.5);
+        }
+        /* Chat Overlay per lo Streamer */
+        #streamer-chat {
+            position: absolute; bottom: 120px; left: 10px; width: 70%;
+            max-height: 200px; overflow-y: auto; z-index: 20;
+            mask-image: linear-gradient(to top, black 80%, transparent 100%);
+        }
+        .chat-msg {
+            background: rgba(0,0,0,0.5); padding: 4px 8px; margin-bottom: 4px;
+            border-radius: 8px; font-size: 12px; width: fit-content;
+            text-shadow: 1px 1px 2px black;
         }
     </style>
 </head>
 <body>
 
-    <div id="live-badge" class="status-badge hidden">🔴 IN ONDA</div>
+    <div id="live-badge" class="status-badge hidden">🔴 ON AIR</div>
 
-    <!-- Video a tutto schermo (come la fotocamera del telefono) -->
+    <!-- Video Camera -->
     <div class="fixed inset-0 z-0">
         <video id="localVideo" autoplay muted playsinline></video>
         <canvas id="canvas" class="hidden"></canvas>
     </div>
 
+    <!-- Chat Overlay (Per vedere le domande) -->
+    <div id="streamer-chat">
+        <div class="chat-msg text-yellow-400">System: Ready to broadcast.</div>
+    </div>
+
     <!-- Pannello Controlli -->
     <div class="control-panel">
         <a href="/" class="bg-gray-800/80 p-4 rounded-full backdrop-blur-md border border-gray-600 text-white">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            <i class="fas fa-times"></i>
         </a>
 
         <button id="btn-start" onclick="startStreaming()" class="bg-green-600 p-6 rounded-full shadow-lg border-4 border-green-400 hover:bg-green-500 transition transform active:scale-95">
-            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+            <i class="fas fa-satellite-dish text-2xl"></i>
         </button>
 
         <button id="btn-stop" onclick="stopStreaming()" class="hidden bg-red-600 p-6 rounded-full shadow-lg border-4 border-red-400 hover:bg-red-500 transition transform active:scale-95 animate-pulse">
-            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+            <i class="fas fa-stop text-2xl"></i>
         </button>
     </div>
 
     <script>
         const socket = io();
-        // Assicurati che {{ stream.id }} sia renderizzato come numero o stringa
         const streamId = "{{ stream.id }}";
         const video = document.getElementById('localVideo');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
+        const chatBox = document.getElementById('streamer-chat');
+        
         let streamingInterval = null;
 
-        // Richiedi fotocamera posteriore
+        // Join room to receive chat messages
+        socket.emit('join_stream', { stream_id: streamId });
+
+        socket.on('new_message', (data) => {
+            const div = document.createElement('div');
+            div.className = "chat-msg";
+            div.innerHTML = `<span class="font-bold text-blue-300">${data.username}:</span> ${data.message}`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
+        socket.on('new_tip', (data) => {
+            const div = document.createElement('div');
+            div.className = "chat-msg border border-yellow-500 bg-yellow-900/50";
+            div.innerHTML = `💎 <span class="font-bold text-yellow-400">${data.username} sent ${data.amount}€!</span>`;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+
         const constraints = {
             audio: false,
             video: { 
-                facingMode: 'environment', // Chiede la camera posteriore
+                facingMode: 'environment', 
                 width: { ideal: 1280 },
                 height: { ideal: 720 }
             }
         };
 
         navigator.mediaDevices.getUserMedia(constraints)
-            .then(stream => {
-                video.srcObject = stream;
-            })
-            .catch(err => {
-                alert("Errore fotocamera: " + err);
-                console.error(err);
-            });
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => alert("Camera Error: " + err));
 
         function startStreaming() {
             socket.emit('stream_status_change', { stream_id: streamId, status: 'live' });
@@ -80,10 +111,15 @@
             document.getElementById('btn-stop').classList.remove('hidden');
             document.getElementById('live-badge').classList.remove('hidden');
 
-            // 10 FPS per non sovraccaricare la rete mobile
             streamingInterval = setInterval(() => {
-                canvas.width = 640; // Risoluzione ridotta per velocità
-                canvas.height = 360;
+                // FIX DEFORMAZIONE: Manteniamo aspect ratio originale
+                const width = 640; // Target width
+                const scale = width / video.videoWidth;
+                const height = video.videoHeight * scale;
+                
+                canvas.width = width;
+                canvas.height = height;
+                
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const imageData = canvas.toDataURL('image/jpeg', 0.6);
                 socket.emit('stream_frame', { stream_id: streamId, image: imageData });
