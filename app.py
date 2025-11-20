@@ -43,31 +43,30 @@ class User(UserMixin, db.Model):
     password = db.Column(db.String(150), nullable=False)
     color = db.Column(db.String(20), default='#ffffff')
     confirmed = db.Column(db.Boolean, default=False)
-    is_streamer = db.Column(db.Boolean, default=False) # Chi può trasmettere?
+    is_streamer = db.Column(db.Boolean, default=False)
 
-# NUOVO MODELLO: I Musei/Eventi
 class Stream(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(150), nullable=False)
     description = db.Column(db.Text, nullable=True)
-    image_url = db.Column(db.String(300)) # Immagine di copertina
-    is_live = db.Column(db.Boolean, default=False) # Se è in diretta ora
+    image_url = db.Column(db.String(300))
+    is_live = db.Column(db.Boolean, default=False)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# --- INIZIALIZZAZIONE DATI (Crea Musei Finti) ---
+# --- INIZIALIZZAZIONE DATI ---
 def init_db():
     db.create_all()
-    # Se non ci sono stream, ne creiamo 3 di esempio
     if Stream.query.count() == 0:
+        # Esempi aggiornati per ItalyFromCouch
         s1 = Stream(title="Galleria degli Uffizi", description="Tour notturno esclusivo tra i capolavori del Rinascimento.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043", is_live=True)
         s2 = Stream(title="Parco Archeologico di Pompei", description="Passeggiata tra le rovine della città eterna al tramonto.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674", is_live=False)
-        s3 = Stream(title="Museo Egizio Torino", description="Scoperta dei sarcofagi e dei misteri dei faraoni.", image_url="https://images.unsplash.com/photo-1566221536239-4f5686115f72", is_live=False)
+        s3 = Stream(title="Colosseo - Arena", description="Visita in prima persona nell'anfiteatro più famoso del mondo.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5", is_live=False)
         db.session.add_all([s1, s2, s3])
         db.session.commit()
-        log("🏛️ Musei di esempio creati nel DB.")
+        log("🏛️ Luoghi ItalyFromCouch inizializzati.")
 
 with app.app_context():
     try:
@@ -100,8 +99,8 @@ def send_confirmation_email(user_email):
             params = {
                 "from": "onboarding@resend.dev",
                 "to": [user_email],
-                "subject": "Benvenuto in MuseumLive",
-                "html": f'<p>Clicca per entrare nel museo: <a href="{confirm_url}">Conferma Email</a></p>'
+                "subject": "Benvenuto in ItalyFromCouch", # AGGIORNATO
+                "html": f'<p>Clicca per iniziare il tour: <a href="{confirm_url}">Conferma Email</a></p>'
             }
             resend.Emails.send(params)
             log("✅ Mail inviata via Resend.")
@@ -114,21 +113,16 @@ def add_header(response):
     return response
 
 # --- ROTTE ---
-
-# 1. Dashboard (Home): Mostra la lista dei musei
 @app.route('/')
 @login_required
 def index():
     streams = Stream.query.all()
     return render_template('dashboard.html', username=current_user.username, streams=streams)
 
-# 2. Pagina Stream (Singolo Museo): Dove vedi il video
 @app.route('/watch/<int:stream_id>')
 @login_required
 def watch(stream_id):
     stream = Stream.query.get_or_404(stream_id)
-    # Nota: Per ora tutti i musei mostrano lo stesso video (la tua webcam/stream)
-    # In futuro potrai avere fonti diverse.
     return render_template('stream.html', username=current_user.username, stream=stream, is_live=streaming_active)
 
 @app.route('/video_feed')
@@ -141,7 +135,6 @@ def video_feed():
 @login_required
 def toggle_stream():
     global streaming_active, camera
-    # Solo per demo: accende la webcam locale
     if not streaming_active:
         try:
             camera = cv2.VideoCapture(0)
@@ -205,7 +198,6 @@ def confirm_email(token):
 @login_required
 def logout(): logout_user(); return redirect(url_for('login'))
 
-# Sockets (Chat e Tip)
 @socketio.on('send_message')
 def handle_message(data):
     if current_user.is_authenticated: emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
