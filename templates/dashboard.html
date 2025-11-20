@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MuseumLive - Esplora</title>
+    <title>ItalyFromCouch - Esplora</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
             background-color: #0d1117; 
-            background-image: url('https://images.unsplash.com/photo-1598448375494-1a986d494951');
+            /* Immagine di un borgo italiano al tramonto */
+            background-image: url('https://images.unsplash.com/photo-1523906834658-6e24ef2386f9');
             background-size: cover;
+            background-position: center;
             background-attachment: fixed;
             font-family: 'Inter', sans-serif;
         }
@@ -30,8 +32,9 @@
     <nav class="glass-panel border-b border-gray-700 p-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto flex justify-between items-center">
             <div class="flex items-center gap-3">
-                <i class="fas fa-landmark text-3xl text-yellow-500"></i>
-                <h1 class="text-2xl font-bold tracking-wide">Museum<span class="text-yellow-500">Live</span></h1>
+                <!-- Icona Monumento -->
+                <i class="fas fa-monument text-3xl text-yellow-500"></i>
+                <h1 class="text-2xl font-bold tracking-wide">ItalyFrom<span class="text-yellow-500">Couch</span></h1>
             </div>
             <div class="flex items-center gap-6">
                 <div class="text-right hidden md:block">
@@ -46,9 +49,9 @@
     <!-- Main Content -->
     <main class="flex-1 p-6 md:p-12 max-w-7xl mx-auto w-full">
         
-        <header class="mb-10 text-center md:text-left">
-            <h2 class="text-4xl font-bold text-white mb-2">Esplora la Storia</h2>
-            <p class="text-gray-400 text-lg">Seleziona un sito archeologico o un museo ed entra nella diretta.</p>
+        <header class="mb-10 text-center md:text-left glass-panel p-6 rounded-xl border border-gray-700/50">
+            <h2 class="text-4xl font-bold text-white mb-2">Il Grand Tour Digitale</h2>
+            <p class="text-gray-300 text-lg">Visita i tesori d'Italia senza alzarti dal divano. Seleziona una diretta.</p>
         </header>
 
         <!-- Griglia Musei -->
@@ -78,7 +81,7 @@
                         <p class="text-gray-400 text-sm line-clamp-2 mb-4 flex-1">{{ stream.description }}</p>
                         
                         <div class="mt-auto flex justify-between items-center">
-                            <span class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Archeologia</span>
+                            <span class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Cultura & Arte</span>
                             <span class="text-yellow-500 font-bold text-sm group-hover:translate-x-1 transition-transform">Entra <i class="fas fa-arrow-right ml-1"></i></span>
                         </div>
                     </div>
@@ -90,7 +93,7 @@
     </main>
 
     <footer class="glass-panel border-t border-gray-800 p-6 text-center text-gray-500 text-sm mt-12">
-        &copy; 2025 MuseumLive - Esplora il mondo da casa tua.
+        &copy; 2025 ItalyFromCouch - Il bello dell'Italia, ovunque tu sia.
     </footer>
 
 </body>
