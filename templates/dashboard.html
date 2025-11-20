@@ -1,18 +1,17 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ItalyFromCouch - Dashboard</title>
+    <title>ItalyFromCouch - Explore</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body {
-            background-color: #0f172a; /* Blu scuro notte */
+            background-color: #0f172a;
             font-family: 'Inter', sans-serif;
             color: #ffffff;
         }
-        /* Sfondo immagine con overlay scuro forte per leggerezza testo */
         .bg-image-container {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
@@ -24,7 +23,7 @@
         .bg-overlay {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.75); /* Sfondo molto scuro per contrasto */
+            background: rgba(0, 0, 0, 0.75);
             z-index: -1;
         }
         .glass-card {
@@ -46,14 +45,13 @@
                 <h1 class="text-2xl font-bold text-white">ItalyFrom<span class="text-gray-400">Couch</span></h1>
             </div>
             <div class="flex items-center gap-4">
-                <!-- Tasto Diventa Guida (Visibile se NON sei ancora guida) -->
                 {% if not user.is_streamer %}
                 <a href="/become_guide" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider shadow-lg transition transform hover:scale-105 border border-blue-400">
-                    <i class="fas fa-id-badge mr-1"></i> Diventa Guida
+                    <i class="fas fa-id-badge mr-1"></i> Become a Guide
                 </a>
                 {% else %}
                 <span class="bg-green-900 text-green-200 px-3 py-1 rounded-full text-xs font-bold border border-green-700">
-                    <i class="fas fa-check-circle"></i> Guida Verificata
+                    <i class="fas fa-check-circle"></i> Verified Guide
                 </span>
                 {% endif %}
 
@@ -63,7 +61,6 @@
     </nav>
 
     <main class="p-6 max-w-7xl mx-auto">
-        <!-- Messaggi Flash -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -76,14 +73,13 @@
         {% endwith %}
 
         <header class="mb-10 text-center text-white">
-            <h2 class="text-4xl font-bold mb-2 text-shadow">Il Grand Tour Digitale</h2>
-            <p class="text-gray-300 text-lg">Esplora i tesori d'Italia o trasmetti dal vivo.</p>
+            <h2 class="text-4xl font-bold mb-2 text-shadow">The Digital Grand Tour</h2>
+            <p class="text-gray-300 text-lg">Explore Italian treasures from your couch.</p>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {% for stream in streams %}
             <div class="glass-card rounded-2xl overflow-hidden flex flex-col h-full shadow-xl transition hover:shadow-2xl hover:border-gray-400">
-                <!-- Immagine -->
                 <div class="relative h-56">
                     <img src="{{ stream.image_url }}" class="w-full h-full object-cover opacity-90">
                     {% if stream.is_live %}
@@ -93,21 +89,18 @@
                     {% endif %}
                 </div>
 
-                <!-- Contenuto -->
                 <div class="p-6 flex-1 flex flex-col text-white">
                     <h3 class="text-xl font-bold mb-2">{{ stream.title }}</h3>
                     <p class="text-gray-300 text-sm mb-6 flex-1">{{ stream.description }}</p>
                     
                     <div class="mt-auto pt-4 border-t border-gray-600 flex flex-col gap-2">
-                        <!-- Tasto Entra (Sempre visibile) -->
                         <a href="/watch/{{ stream.id }}" class="block w-full bg-gray-100 hover:bg-white text-gray-900 text-center py-2 rounded-lg font-bold text-sm transition">
-                            Entra come Spettatore
+                            Enter as Viewer
                         </a>
 
-                        <!-- Tasto Trasmetti (Solo per Guide) -->
                         {% if user.is_streamer %}
                         <a href="/broadcast/{{ stream.id }}" class="block w-full bg-red-600 hover:bg-red-500 text-white text-center py-2 rounded-lg font-bold text-sm transition shadow-lg border border-red-400">
-                            <i class="fas fa-video mr-2"></i> TRASMETTI QUI (Mobile)
+                            <i class="fas fa-video mr-2"></i> BROADCAST HERE
                         </a>
                         {% endif %}
                     </div>
