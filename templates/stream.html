@@ -22,15 +22,29 @@
 </head>
 <body class="text-white h-screen flex flex-col overflow-hidden">
 
-    <!-- Navbar Semplificata -->
+    <!-- Flash Messages per Conferma Pagamento -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="absolute top-16 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4">
+            {% for category, message in messages %}
+                <div class="p-4 rounded-lg shadow-2xl mb-4 text-center border backdrop-blur-md
+                    {% if category == 'success' %} bg-green-900/80 border-green-500/50 text-white font-bold
+                    {% else %} bg-gray-800/90 border-gray-500/50 text-white {% endif %}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Navbar -->
     <nav class="bg-gray-900 border-b border-gray-800 p-3 flex justify-between items-center h-14 shrink-0 z-20">
         <a href="/" class="flex items-center gap-2 text-gray-400 hover:text-white transition">
             <i class="fas fa-arrow-left"></i> <span class="font-bold text-sm">Torna alla Hall</span>
         </a>
-        <div class="font-bold text-yellow-500 tracking-wide text-lg">{{ stream.title }}</div>
+        <div class="font-bold text-gray-200 tracking-wide text-lg">{{ stream.title }}</div>
         <div class="w-24 text-right">
-            <!-- Spazio vuoto per bilanciare o controlli futuri -->
-            {% if stream.is_live %}
+            {% if is_live %}
                 <span class="bg-red-600 text-white text-xs px-2 py-1 rounded animate-pulse">LIVE</span>
             {% endif %}
         </div>
@@ -48,7 +62,6 @@
                         <p class="text-gray-400 text-xl">Il museo è chiuso al momento.</p>
                         <p class="text-gray-600 text-sm mt-2">La diretta è terminata o non è ancora iniziata.</p>
                         
-                        <!-- Tasto Admin per attivare -->
                         <form action="/toggle_stream" method="POST" class="mt-6">
                             <button type="submit" class="bg-gray-800 hover:bg-gray-700 text-gray-400 px-4 py-2 rounded text-sm transition border border-gray-700">
                                 (Admin) Avvia Test Cam
@@ -58,38 +71,26 @@
                 {% endif %}
                 <div id="tip-overlay" class="absolute top-10 right-10 w-80 z-50 pointer-events-none"></div>
             </div>
-            
-            <!-- Info Stream -->
-            <div class="h-20 bg-gray-900 p-4 border-t border-gray-800 flex items-center justify-between shrink-0">
-                <div>
-                    <h2 class="font-bold text-white">{{ stream.title }}</h2>
-                    <p class="text-xs text-gray-400 max-w-2xl truncate">{{ stream.description }}</p>
-                </div>
-                <div class="flex gap-4">
-                     <button class="text-gray-400 hover:text-yellow-500 transition"><i class="far fa-heart"></i> Segui</button>
-                     <button class="text-gray-400 hover:text-blue-500 transition"><i class="fas fa-share-alt"></i> Condividi</button>
-                </div>
-            </div>
         </main>
 
-        <!-- Chat (Laterale) -->
+        <!-- Chat -->
         <aside class="w-80 bg-gray-900 border-l border-gray-800 flex flex-col shrink-0 z-10">
             <div class="p-3 border-b border-gray-800 font-bold text-gray-400 text-xs uppercase tracking-widest text-center">Chat del Museo</div>
             <div id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-2 text-sm"></div>
             
             <div class="p-3 bg-gray-800">
                 <form id="chat-form" class="flex gap-2">
-                    <input type="text" id="message-input" placeholder="Commenta..." class="w-full bg-gray-900 text-white rounded px-3 py-2 focus:outline-none border border-gray-700 focus:border-yellow-500 transition text-sm">
-                    <button type="submit" class="text-yellow-500 hover:text-yellow-400 px-2"><i class="fas fa-paper-plane"></i></button>
+                    <input type="text" id="message-input" placeholder="Commenta..." class="w-full bg-gray-900 text-white rounded px-3 py-2 focus:outline-none border border-gray-700 focus:border-gray-500 transition text-sm">
+                    <button type="submit" class="text-gray-400 hover:text-white px-2"><i class="fas fa-paper-plane"></i></button>
                 </form>
             </div>
 
             <div class="p-4 border-t border-gray-800 bg-gray-900">
                 <h3 class="text-gray-500 font-bold mb-3 text-center text-xs uppercase">Sostieni il restauro</h3>
                 <div class="grid grid-cols-3 gap-2">
-                    <button onclick="sendTip(2)" class="bg-gray-800 hover:bg-yellow-600 hover:text-black text-yellow-500 font-bold py-2 rounded border border-yellow-500/30 transition text-xs">2€</button>
-                    <button onclick="sendTip(5)" class="bg-gray-800 hover:bg-yellow-600 hover:text-black text-yellow-500 font-bold py-2 rounded border border-yellow-500/30 transition text-xs">5€</button>
-                    <button onclick="sendTip(10)" class="bg-gray-800 hover:bg-yellow-600 hover:text-black text-yellow-500 font-bold py-2 rounded border border-yellow-500/30 transition text-xs">10€</button>
+                    <button onclick="startPayment(2)" class="bg-gray-800 hover:bg-gray-100 hover:text-gray-900 text-gray-300 font-bold py-2 rounded border border-gray-700 transition text-xs shadow-sm">2€</button>
+                    <button onclick="startPayment(5)" class="bg-gray-800 hover:bg-gray-100 hover:text-gray-900 text-gray-300 font-bold py-2 rounded border border-gray-700 transition text-xs shadow-sm">5€</button>
+                    <button onclick="startPayment(10)" class="bg-gray-800 hover:bg-gray-100 hover:text-gray-900 text-gray-300 font-bold py-2 rounded border border-gray-700 transition text-xs shadow-sm">10€</button>
                 </div>
             </div>
         </aside>
@@ -98,18 +99,43 @@
     <script>
         const socket = io();
         const chatBox = document.getElementById('chat-box');
+        
+        // ID dello stream corrente (passato da Flask)
+        const streamId = {{ stream.id }};
+
+        // --- FUNZIONE DI PAGAMENTO STRIPE ---
+        async function startPayment(amount) {
+            try {
+                const response = await fetch('/create-checkout-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: amount, stream_id: streamId })
+                });
+                
+                const data = await response.json();
+                if (data.url) {
+                    // Reindirizza l'utente alla pagina di pagamento Stripe
+                    window.location.href = data.url;
+                } else {
+                    alert("Errore creazione pagamento: " + (data.error || 'Sconosciuto'));
+                }
+            } catch (error) {
+                console.error("Errore fetch:", error);
+                alert("Errore di connessione al server pagamenti.");
+            }
+        }
 
         socket.on('new_message', (data) => {
             const div = document.createElement('div');
-            div.innerHTML = `<span class="font-bold text-yellow-500/80">${data.username}:</span> <span class="text-gray-300">${data.message}</span>`;
+            div.innerHTML = `<span class="font-bold text-gray-400">${data.username}:</span> <span class="text-gray-300">${data.message}</span>`;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
         });
 
         socket.on('new_tip', (data) => {
             const div = document.createElement('div');
-            div.className = "bg-yellow-500/10 border border-yellow-500/50 p-2 rounded my-2 text-center";
-            div.innerHTML = `<p class="text-yellow-500 font-bold text-xs">🏛️ ${data.username} ha donato ${data.amount}€!</p>`;
+            div.className = "bg-gray-800 border border-gray-600 p-2 rounded my-2 text-center shadow-md";
+            div.innerHTML = `<p class="text-white font-bold text-xs">🏛️ ${data.username} ha donato ${data.amount}€!</p>`;
             chatBox.appendChild(div);
             chatBox.scrollTop = chatBox.scrollHeight;
             showOverlayNotification(data.username, data.amount);
@@ -124,13 +150,11 @@
             }
         });
 
-        function sendTip(amount) { socket.emit('send_tip', { amount: amount }); }
-
         function showOverlayNotification(user, amount) {
             const overlay = document.getElementById('tip-overlay');
             const notif = document.createElement('div');
-            notif.className = "bg-black/80 p-4 rounded-xl border border-yellow-500 tip-animation backdrop-blur-sm text-center";
-            notif.innerHTML = `<h3 class="text-lg font-bold text-yellow-500">GRAZIE!</h3><p class="text-sm text-white mt-1">${user}</p><p class="text-2xl font-bold text-white mt-1">${amount}€</p>`;
+            notif.className = "bg-black/80 p-4 rounded-xl border border-gray-400 tip-animation backdrop-blur-sm text-center shadow-2xl";
+            notif.innerHTML = `<h3 class="text-lg font-bold text-white">GRAZIE!</h3><p class="text-sm text-gray-300 mt-1">${user}</p><p class="text-2xl font-bold text-white mt-1">${amount}€</p>`;
             overlay.appendChild(notif);
             setTimeout(() => { notif.style.opacity = '0'; setTimeout(() => notif.remove(), 500); }, 5000);
         }
