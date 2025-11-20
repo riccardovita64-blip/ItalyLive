@@ -1,6 +1,19 @@
 import os
 import random
 import sys
+import socket
+
+# --- FIX RETE: FORZA IPV4 per Stripe e altre connessioni su Render ---
+def force_ipv4():
+    old_getaddrinfo = socket.getaddrinfo
+    def new_getaddrinfo(*args, **kwargs):
+        responses = old_getaddrinfo(*args, **kwargs)
+        return [response for response in responses if response[0] == socket.AF_INET]
+    socket.getaddrinfo = new_getaddrinfo
+
+force_ipv4()
+# --------------------------------------------------------------------
+
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -9,7 +22,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer
 import cv2
 import resend
-import stripe  # 1. Importiamo Stripe
+import stripe
 
 def log(message):
     print(message, file=sys.stdout, flush=True)
@@ -20,8 +33,10 @@ app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 
 
 # --- CONFIGURAZIONE STRIPE ---
 stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
-# Dominio del sito (necessario per i redirect di Stripe)
 DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000')
+
+log(f"🔑 Stripe API Key configurata: {'✅ Sì' if stripe.api_key else '❌ NO - CONTROLLA ENV'}")
+log(f"🌐 Domain URL: {DOMAIN}")
 
 # --- DB ---
 database_url = os.environ.get('DATABASE_URL')
@@ -121,12 +136,19 @@ def add_header(response):
 @login_required
 def create_checkout_session():
     try:
+        # Verifica configurazione
+        if not stripe.api_key:
+            log("❌ STRIPE_SECRET_KEY non configurata!")
+            return jsonify({'error': 'Stripe non configurato sul server'}), 500
+            
         data = request.json
-        amount_eur = data.get('amount', 5) # Default 5 euro
+        amount_eur = data.get('amount', 5)
         stream_id = data.get('stream_id', 1)
         
-        # Converti in centesimi (Stripe lavora in centesimi)
+        # Converti in centesimi
         amount_cents = int(float(amount_eur) * 100)
+        
+        log(f"💳 Creazione pagamento: {amount_eur}€ ({amount_cents} centesimi) per user {current_user.username}")
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -135,7 +157,7 @@ def create_checkout_session():
                     'currency': 'eur',
                     'product_data': {
                         'name': 'Donazione Museo',
-                        'description': f'Supporto per {current_user.username}',
+                        'description': f'Supporto da {current_user.username}',
                         'images': ['https://images.unsplash.com/photo-1555661879-423a5383a674'],
                     },
                     'unit_amount': amount_cents,
@@ -143,18 +165,26 @@ def create_checkout_session():
                 'quantity': 1,
             }],
             mode='payment',
-            # Metadata per passare informazioni alla pagina di successo
             metadata={
                 'username': current_user.username,
                 'amount': amount_eur,
                 'stream_id': stream_id
             },
-            success_url=DOMAIN + '/payment/success?session_id={CHECKOUT_SESSION_ID}',
-            cancel_url=DOMAIN + f'/watch/{stream_id}',
+            success_url=f"{DOMAIN}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{DOMAIN}/watch/{stream_id}",
         )
+        
+        log(f"✅ Sessione Stripe creata: {checkout_session.id}")
         return jsonify({'url': checkout_session.url})
+        
+    except stripe.error.AuthenticationError as e:
+        log(f"❌ Stripe Auth Error: {e}")
+        return jsonify({'error': 'Chiave API Stripe non valida'}), 500
+    except stripe.error.APIConnectionError as e:
+        log(f"❌ Stripe Connection Error: {e}")
+        return jsonify({'error': 'Errore di connessione a Stripe'}), 500
     except Exception as e:
-        log(f"Stripe Error: {e}")
+        log(f"❌ Stripe Error generico: {type(e).__name__}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/payment/success')
@@ -162,20 +192,27 @@ def create_checkout_session():
 def payment_success():
     session_id = request.args.get('session_id')
     if session_id:
-        # Recupera i dettagli dalla sessione Stripe
-        session = stripe.checkout.Session.retrieve(session_id)
-        donor = session.metadata.get('username', 'Anonimo')
-        amount = session.metadata.get('amount', '0')
-        stream_id = session.metadata.get('stream_id', '1')
-        
-        # Emetti la notifica in tempo reale a tutti
-        socketio.emit('new_tip', {
-            'username': donor,
-            'amount': amount
-        })
-        
-        flash(f"Grazie {donor}! La tua donazione di {amount}€ è stata ricevuta.", "success")
-        return redirect(url_for('watch', stream_id=stream_id))
+        try:
+            # Recupera i dettagli dalla sessione Stripe
+            session = stripe.checkout.Session.retrieve(session_id)
+            donor = session.metadata.get('username', 'Anonimo')
+            amount = session.metadata.get('amount', '0')
+            stream_id = session.metadata.get('stream_id', '1')
+            
+            log(f"✅ Pagamento completato: {donor} - {amount}€")
+            
+            # Emetti la notifica in tempo reale a tutti
+            socketio.emit('new_tip', {
+                'username': donor,
+                'amount': amount
+            })
+            
+            flash(f"Grazie {donor}! La tua donazione di {amount}€ è stata ricevuta.", "success")
+            return redirect(url_for('watch', stream_id=stream_id))
+        except Exception as e:
+            log(f"❌ Errore recupero sessione: {e}")
+            flash("Pagamento completato ma errore nel recupero dettagli.", "warning")
+            return redirect(url_for('index'))
         
     return redirect(url_for('index'))
 
@@ -271,7 +308,6 @@ def confirm_email(token):
 @login_required
 def logout(): logout_user(); return redirect(url_for('login'))
 
-# SocketIO per Chat e Tips (Tips ora vengono triggerati dal backend stripe success)
 @socketio.on('send_message')
 def handle_message(data):
     if current_user.is_authenticated: emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
