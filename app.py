@@ -1,14 +1,15 @@
 import os
 import random
 import sys
-from flask import Flask, render_template, request, redirect, url_for, flash, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
 from flask_socketio import SocketIO, emit
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from itsdangerous import URLSafeTimedSerializer, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer
 import cv2
 import resend
+import stripe  # 1. Importiamo Stripe
 
 def log(message):
     print(message, file=sys.stdout, flush=True)
@@ -16,6 +17,11 @@ def log(message):
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'chiave_segreta_default_per_sviluppo')
 app.config['SECURITY_PASSWORD_SALT'] = os.environ.get('SECURITY_PASSWORD_SALT', 'salt_sicurezza_link')
+
+# --- CONFIGURAZIONE STRIPE ---
+stripe.api_key = os.environ.get('STRIPE_SECRET_KEY')
+# Dominio del sito (necessario per i redirect di Stripe)
+DOMAIN = os.environ.get('DOMAIN_URL', 'http://127.0.0.1:5000')
 
 # --- DB ---
 database_url = os.environ.get('DATABASE_URL')
@@ -60,13 +66,11 @@ def load_user(user_id):
 def init_db():
     db.create_all()
     if Stream.query.count() == 0:
-        # Esempi aggiornati per ItalyFromCouch
         s1 = Stream(title="Galleria degli Uffizi", description="Tour notturno esclusivo tra i capolavori del Rinascimento.", image_url="https://images.unsplash.com/photo-1580226326847-e7b5c2d5c043", is_live=True)
         s2 = Stream(title="Parco Archeologico di Pompei", description="Passeggiata tra le rovine della città eterna al tramonto.", image_url="https://images.unsplash.com/photo-1555661879-423a5383a674", is_live=False)
         s3 = Stream(title="Colosseo - Arena", description="Visita in prima persona nell'anfiteatro più famoso del mondo.", image_url="https://images.unsplash.com/photo-1552832230-c0197dd311b5", is_live=False)
         db.session.add_all([s1, s2, s3])
         db.session.commit()
-        log("🏛️ Luoghi ItalyFromCouch inizializzati.")
 
 with app.app_context():
     try:
@@ -99,11 +103,10 @@ def send_confirmation_email(user_email):
             params = {
                 "from": "onboarding@resend.dev",
                 "to": [user_email],
-                "subject": "Benvenuto in ItalyFromCouch", # AGGIORNATO
+                "subject": "Benvenuto in ItalyFromCouch",
                 "html": f'<p>Clicca per iniziare il tour: <a href="{confirm_url}">Conferma Email</a></p>'
             }
             resend.Emails.send(params)
-            log("✅ Mail inviata via Resend.")
         except Exception as e:
             log(f"❌ Errore Resend: {e}")
 
@@ -112,7 +115,77 @@ def add_header(response):
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# --- ROTTE ---
+# --- ROTTE STRIPE (PAGAMENTI) ---
+
+@app.route('/create-checkout-session', methods=['POST'])
+@login_required
+def create_checkout_session():
+    try:
+        data = request.json
+        amount_eur = data.get('amount', 5) # Default 5 euro
+        stream_id = data.get('stream_id', 1)
+        
+        # Converti in centesimi (Stripe lavora in centesimi)
+        amount_cents = int(float(amount_eur) * 100)
+
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'eur',
+                    'product_data': {
+                        'name': 'Donazione Museo',
+                        'description': f'Supporto per {current_user.username}',
+                        'images': ['https://images.unsplash.com/photo-1555661879-423a5383a674'],
+                    },
+                    'unit_amount': amount_cents,
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            # Metadata per passare informazioni alla pagina di successo
+            metadata={
+                'username': current_user.username,
+                'amount': amount_eur,
+                'stream_id': stream_id
+            },
+            success_url=DOMAIN + '/payment/success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=DOMAIN + f'/watch/{stream_id}',
+        )
+        return jsonify({'url': checkout_session.url})
+    except Exception as e:
+        log(f"Stripe Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/payment/success')
+@login_required
+def payment_success():
+    session_id = request.args.get('session_id')
+    if session_id:
+        # Recupera i dettagli dalla sessione Stripe
+        session = stripe.checkout.Session.retrieve(session_id)
+        donor = session.metadata.get('username', 'Anonimo')
+        amount = session.metadata.get('amount', '0')
+        stream_id = session.metadata.get('stream_id', '1')
+        
+        # Emetti la notifica in tempo reale a tutti
+        socketio.emit('new_tip', {
+            'username': donor,
+            'amount': amount
+        })
+        
+        flash(f"Grazie {donor}! La tua donazione di {amount}€ è stata ricevuta.", "success")
+        return redirect(url_for('watch', stream_id=stream_id))
+        
+    return redirect(url_for('index'))
+
+@app.route('/payment/cancel')
+def payment_cancel():
+    flash("Pagamento annullato.", "info")
+    return redirect(url_for('index'))
+
+# --- ALTRE ROTTE ---
+
 @app.route('/')
 @login_required
 def index():
@@ -198,13 +271,10 @@ def confirm_email(token):
 @login_required
 def logout(): logout_user(); return redirect(url_for('login'))
 
+# SocketIO per Chat e Tips (Tips ora vengono triggerati dal backend stripe success)
 @socketio.on('send_message')
 def handle_message(data):
     if current_user.is_authenticated: emit('new_message', {'username': current_user.username, 'message': data['message'], 'color': current_user.color}, broadcast=True)
-
-@socketio.on('send_tip')
-def handle_tip(data):
-    if current_user.is_authenticated: emit('new_tip', {'username': current_user.username, 'amount': data['amount']}, broadcast=True)
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='0.0.0.0', port=5000)
